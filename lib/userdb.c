@@ -10,6 +10,8 @@
 #define USER_INVALD 0
 #define USER_DOESNT_EXIST -1
 #define VALIDATION_ERROR -2
+#define SUCCESS 1
+#define FAIL 0
 
 
 #define NO_ROW_AVAILABLE 101
@@ -18,10 +20,9 @@
 #define SALT_BASE64_LENGTH 25
 
 void handleErrors(){
-    printf("Panic! Digest message failed\n");
+    fprintf(stderr, "Panic! Digest message failed\n");
     return;
 }
-
 
 //Old SHA256_Init() was depracated
 void digest_message(const unsigned char *message, size_t message_len, unsigned char **digest, unsigned int *digest_len)
@@ -164,10 +165,11 @@ sqlite3 *create_database(char* name){
     "PASSWORD_SALT TEXT  NOT NULL, "\
     "PASSWORD_HASH TEXT  NOT NULL);";
 
+
     rc = sqlite3_exec(db, sql, callback, 0, &zErrMsg);
     
     if(rc != SQLITE_OK){
-        fprintf(stderr, "SQL error while creating database: %s\n", zErrMsg);
+        fprintf(stderr, "SQL error while creating users table: %s\n", zErrMsg);
         sqlite3_free(zErrMsg);
         sqlite3_close(db);
         return NULL;
@@ -185,6 +187,23 @@ sqlite3 *create_database(char* name){
         return NULL;
     }
 
+    sql = "CREATE TABLE IF NOT EXISTS MESSAGES(" \
+    "ID INTEGER PRIMARY KEY AUTOINCREMENT, "\
+    "SENDER_ID INTEGER NOT NULL, "\
+    "RECEIVER_ID INTEGER NOT NULL," \
+    "CONTENT TEXT NOT NULL," \
+    "TIMESTAMP DATETIME DEFAULT CURRENT_TIMESTAMP, "\
+    "FOREIGN KEY(SENDER_ID) REFERENCES USERS(ID), " \
+    "FOREIGN KEY(RECEIVER_ID) REFERENCES USERS(ID));";
+    
+    
+    rc = sqlite3_exec(db, sql, callback, 0, &zErrMsg);
+
+    if(rc!= SQLITE_OK){
+        fprintf(stderr, "SQL error while creating messages table: %s\n", zErrMsg);
+    }
+
+
     sqlite3_free(zErrMsg);
     return db;
 
@@ -192,7 +211,6 @@ sqlite3 *create_database(char* name){
 
 
 int add_user(sqlite3 *db, char *username, char *password){
-    //char *zErrMsg = 0;
     int rc;
 
     unsigned char binary_salt[SALTLENGTH];
@@ -231,7 +249,7 @@ int add_user(sqlite3 *db, char *username, char *password){
         free(final_hash);
         free(binary_hash);
         free(salt_and_pass);
-        return 1;
+        return FAIL;
     }
     sqlite3_bind_text(stmt, 1, username, -1, SQLITE_STATIC);
     sqlite3_bind_text(stmt, 2, salt, -1, SQLITE_STATIC);
@@ -240,6 +258,8 @@ int add_user(sqlite3 *db, char *username, char *password){
     rc = sqlite3_step(stmt);
     if (rc != SQLITE_DONE) {
         fprintf(stderr, "SQL error while adding new user: %s\n", sqlite3_errmsg(db));
+        sqlite3_finalize(stmt);
+        return FAIL;
     }
     sqlite3_finalize(stmt);
 
@@ -250,7 +270,7 @@ int add_user(sqlite3 *db, char *username, char *password){
     free(binary_hash);
     free(salt_and_pass);
 
-    return 0;
+    return SUCCESS;
 }
 
 int is_user_valid(sqlite3* db, char* username, char* password){
@@ -372,6 +392,11 @@ bool does_user_exist(sqlite3 *db, char* username){
 
 }
 
+int add_message(sqlite3 *db, int *sender_id, int *receiver_id, char* text){
+    //TODO
+    return 0;
+}
+
 int print_all(sqlite3 *db){
     char *zErrMsg;
     int rc;
@@ -394,16 +419,16 @@ int print_all(sqlite3 *db){
 }
 
 
-
 //void digest_message(const unsigned char *message, size_t message_len, unsigned char **digest, unsigned int *digest_len)
 
 int main(){
     sqlite3* db = create_database("db");
-    add_user(db, "user", "pass");
-    add_user(db, "user1", "pass2");
 
-    
+    add_user(db, "user", "pass");
+    add_user(db, "user1", "pass1");
+    add_user(db, "user2", "pass2");
+
+    print_all(db);
 
     return 0;
-
 }
