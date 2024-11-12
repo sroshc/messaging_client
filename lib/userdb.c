@@ -392,9 +392,32 @@ bool does_user_exist(sqlite3 *db, char* username){
 
 }
 
-int add_message(sqlite3 *db, int *sender_id, int *receiver_id, char* text){
-    //TODO
-    return 0;
+int add_message(sqlite3 *db, int sender_id, int receiver_id, char *text){
+    const char *sql = "INSERT INTO MESSAGES (SENDER_ID, RECEIVER_ID, CONTENT) VALUES (?, ?, ?)";
+    sqlite3_stmt* stmt;
+    int rc;
+
+    rc = sqlite3_prepare_v2(db, sql, -1, &stmt, 0);
+
+    if(rc != SQLITE_OK){
+        fprintf(stderr, "Failed preparing SQL statement for add_message(): %s\n", sqlite3_errmsg(db));
+        return FAIL;
+    }
+
+    sqlite3_bind_int(stmt, 1, sender_id);
+    sqlite3_bind_int(stmt, 2, receiver_id);
+    sqlite3_bind_text(stmt, 3, text, -1, SQLITE_STATIC);
+
+    rc = sqlite3_step(stmt);
+
+    if(rc != SQLITE_OK){
+        fprintf(stderr, "Failed sqlite3_step() in add_message(): %s\n");
+        sqlite3_finalize(stmt);
+        return FAIL;
+    }
+
+    sqlite3_finalize(stmt);
+    return SUCCESS;
 }
 
 int print_all(sqlite3 *db){
@@ -403,7 +426,7 @@ int print_all(sqlite3 *db){
     char *sql;
     const char* data = "Callback function called";
 
-    sql = "SELECT * from USERS";
+    sql = "SELECT * from MESSAGES";
 
     rc = sqlite3_exec(db, sql, callback, (void*)data, &zErrMsg);
 
@@ -427,6 +450,10 @@ int main(){
     add_user(db, "user", "pass");
     add_user(db, "user1", "pass1");
     add_user(db, "user2", "pass2");
+
+    add_message(db, 1, 2, "hello");
+
+
 
     print_all(db);
 
