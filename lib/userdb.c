@@ -159,6 +159,8 @@ sqlite3 *create_database(char* name){
         return NULL;
     }
 
+    sqlite3_exec(db, "PRAGMA foreign_keys = ON;", NULL, NULL, NULL); // To enable foreign keys or whatever
+
     sql = "CREATE TABLE IF NOT EXISTS USERS(" \
     "ID INTEGER PRIMARY KEY AUTOINCREMENT, "\
     "USERNAME   TEXT    NOT NULL UNIQUE, "\
@@ -410,8 +412,10 @@ int add_message(sqlite3 *db, int sender_id, int receiver_id, char *text){
 
     rc = sqlite3_step(stmt);
 
+    
+
     if(rc != SQLITE_OK){
-        fprintf(stderr, "Failed sqlite3_step() in add_message(): %s\n");
+        fprintf(stderr, "Failed sqlite3_step() in add_message(): %s\n", sqlite3_errmsg(db));
         sqlite3_finalize(stmt);
         return FAIL;
     }
@@ -420,13 +424,16 @@ int add_message(sqlite3 *db, int sender_id, int receiver_id, char *text){
     return SUCCESS;
 }
 
-int print_all(sqlite3 *db){
+int print_all(sqlite3 *db, char* table){
     char *zErrMsg;
     int rc;
-    char *sql;
+    char sql[256];
     const char* data = "Callback function called";
 
-    sql = "SELECT * from MESSAGES";
+    //sql = "SELECT * from MESSAGES";
+
+    snprintf(sql, 255 ,"SELECT * from %s", table);
+
 
     rc = sqlite3_exec(db, sql, callback, (void*)data, &zErrMsg);
 
@@ -451,11 +458,19 @@ int main(){
     add_user(db, "user1", "pass1");
     add_user(db, "user2", "pass2");
 
-    add_message(db, 1, 2, "hello");
+    
+    if(add_message(db, 5, 4, "hello") == FAIL){
+        printf("FAILED\n");
+    }
+
+    if(add_message(db, 1, 2, "hello") == FAIL){
+        printf("FAILED\n");
+    }
 
 
 
-    print_all(db);
+    print_all(db, "USERS");
+    print_all(db, "MESSAGES");
 
     return 0;
 }
