@@ -10,6 +10,11 @@
 #define KEY "server.key"
 #define PORT 8181
 
+#define NOT_AUTHORIZED "NOT_AUTHORIZED"
+#define AUTHORIZED "AUTHORIZED"
+#define FAILED "FAILED"
+#define SUCCESS "SUCCESS"
+
 int main(){
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
 
@@ -17,6 +22,8 @@ int main(){
     addr.sin_family = AF_INET;
     addr.sin_port = htons(PORT);
     addr.sin_addr.s_addr = INADDR_ANY;
+
+
 
     bind(sockfd, (struct sockaddr*)&addr, sizeof(addr));
     listen(sockfd, 10);

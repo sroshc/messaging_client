@@ -6,7 +6,7 @@
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 
-#define SERVER_PORT 4433
+#define SERVER_PORT 8181
 #define SERVER_ADDR "127.0.0.1"
 #define CERT_FILE "server.crt"  // The server's self-signed certificate
 #define BUF_SIZE 1024

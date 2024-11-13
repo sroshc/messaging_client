@@ -452,21 +452,10 @@ int print_all(sqlite3 *db, char* table){
 
 }
 
+void close_db(sqlite3 *db){
+    sqlite3_close(db);
+    return;
+}
 
 //void digest_message(const unsigned char *message, size_t message_len, unsigned char **digest, unsigned int *digest_len)
 
-int main(){
-    sqlite3* db = create_database("db");
-
-    add_user(db, "user", "pass");
-    add_user(db, "user1", "pass1");
-    add_user(db, "user2", "pass2");
-
-
-
-
-    print_all(db, "USERS");
-    print_all(db, "MESSAGES");
-
-    return 0;
-}

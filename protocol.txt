@@ -1,0 +1,13 @@
+Format for client:
+    <COMMAND>/(<arg1>, <arg2>, <arg3>, ...)/<SESSION_TOKEN>
+
+The session token can be null if the user is making an account or logging in
+
+Server response:
+    NOT_AUTHORIZED
+    AUTHORIZED/<NEW_SESSION_TOKEN>
+    FAILED
+    SUCCESS
+
+NOT_AUTHORIZED returns when the session_token isn't present or is invalid
+Authorized returns the newly generated session key when the user logs into a new session
