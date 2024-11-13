@@ -13,8 +13,9 @@
 #define SUCCESS 1
 #define FAIL 0
 
-
 #define NO_ROW_AVAILABLE 101
+#define INVALID_MESSAGE 19
+
 #define SALTLENGTH 16
 #define HASHLENGTH 32
 #define SALT_BASE64_LENGTH 25
@@ -412,9 +413,12 @@ int add_message(sqlite3 *db, int sender_id, int receiver_id, char *text){
 
     rc = sqlite3_step(stmt);
 
-    
+    if(rc == INVALID_MESSAGE){
+        sqlite3_finalize(stmt);
+        return FAIL;
+    }
 
-    if(rc != SQLITE_OK){
+    if(rc != SQLITE_OK && rc != NO_ROW_AVAILABLE){
         fprintf(stderr, "Failed sqlite3_step() in add_message(): %s\n", sqlite3_errmsg(db));
         sqlite3_finalize(stmt);
         return FAIL;
@@ -458,14 +462,6 @@ int main(){
     add_user(db, "user1", "pass1");
     add_user(db, "user2", "pass2");
 
-    
-    if(add_message(db, 5, 4, "hello") == FAIL){
-        printf("FAILED\n");
-    }
-
-    if(add_message(db, 1, 2, "hello") == FAIL){
-        printf("FAILED\n");
-    }
 
 
 
