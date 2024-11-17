@@ -161,7 +161,6 @@ RSA_key* init_rsa_key(char* private_file, char* public_file){
     RSA_key* key = malloc(sizeof(RSA_key));
     FILE *pFile;
 
-
     pFile = fopen(private_file, "r");
     if (!pFile) {
         perror("Error opening private key file");
@@ -203,15 +202,34 @@ RSA_key* init_rsa_key(char* private_file, char* public_file){
     return key;
 }
 
-void change_ctx(RSA_key* key, EVP_PKEY* pkey){
-    EVP_PKEY_CTX_free(key->ctx);
-    key->ctx = EVP_PKEY_CTX_new(pkey, NULL);
+int change_ctx_encrypt(RSA_key* key){
+    if(key->ctx) EVP_PKEY_CTX_free(key->ctx);
+
+    key->ctx = EVP_PKEY_CTX_new(key->publickey, NULL);
+    if(EVP_PKEY_encrypt_init(key->ctx) <= 0){
+        return -1;
+    }
     if (!key->ctx) {
-        handleErrors();
+        return -1;
+    }
+
+    return 0;
+}
+
+int change_ctx_decrypt(RSA_key* key){
+    if(key->ctx) EVP_PKEY_CTX_free(key->ctx);
+
+    key->ctx = EVP_PKEY_CTX_new(key->privatekey, NULL);
+    if(EVP_PKEY_decrypt_init(key->ctx) <= 0){
+        return -1;
+    }
+    if (!key->ctx) {
+        return -1;
     }
     
-    return;
+    return 0;
 }
+
 
 void free_rsa_key(RSA_key* key){
     EVP_PKEY_free(key->privatekey);
@@ -231,64 +249,102 @@ void test_sym_encrypt(){
     printf("%s\n", decryptedtext);
 }
 
+typedef struct plaintext_cipher_pair{
+    unsigned char* ptext;
+    unsigned char* ctext;
+
+}Ptext_ctext_pair;
+
+Ptext_ctext_pair* init_rsa_pair(){
+    Ptext_ctext_pair* res = malloc(sizeof(Ptext_ctext_pair));
+    
+    res->ptext = NULL;
+    res->ctext = NULL;
+
+    return res;
+}
+
+void free_rsa_pair(Ptext_ctext_pair* pair){
+    if(pair->ptext) free(pair->ptext);
+    if(pair->ctext) free(pair->ctext);
+    free(pair);
+
+    return;
+}
+
+int rsa_encrypt_pair(RSA_key* key, Ptext_ctext_pair* pair) {
+    if (change_ctx_encrypt(key) != 0) {
+        return -1;
+    }
+
+    if (!pair->ptext) {
+        return -1;
+    }
+    if (pair->ctext) {
+        free(pair->ctext);
+    }
+
+    size_t encrypted_length;
+    pair->ctext = malloc(EVP_PKEY_get_size(key->publickey));
+
+    if (EVP_PKEY_encrypt(key->ctx, pair->ctext, &encrypted_length, pair->ptext, strlen((char *)pair->ptext)) <= 0) {
+        return -1;
+    }
+
+    pair->ctext = realloc(pair->ctext, encrypted_length);
+
+    return 0;
+}
+
+int rsa_decrypt_pair(RSA_key *key, Ptext_ctext_pair* pair) {
+    if (change_ctx_decrypt(key) != 0) {
+        return -1;
+    }
+
+    if (!pair->ctext) {
+        return -1;
+    }
+    if (pair->ptext) {
+        free(pair->ptext);
+    }
+
+    size_t decrypted_length;
+    pair->ptext = malloc(EVP_PKEY_get_size(key->privatekey) + 1);
+
+    if (EVP_PKEY_decrypt(key->ctx, pair->ptext, &decrypted_length, pair->ctext, EVP_PKEY_get_size(key->privatekey)) <= 0) {
+        return -1;
+    }
+
+    pair->ptext[decrypted_length] = '\0';  // Null-terminate the decrypted text
+
+    return 0;
+}
+
 
 int main(void) {
     RSA_key* key = init_rsa_key("private_key.pem", "public_key.pem");
-    
-    unsigned char *encrypted = NULL, *decrypted = NULL;
+    Ptext_ctext_pair* encryptedpair = init_rsa_pair();
+
     unsigned char data[] = "Hello, this is a test message!";
-    size_t encrypted_length, decrypted_length;
     
-    
-    if (EVP_PKEY_encrypt(key->ctx, NULL, &encrypted_length, data, strlen((char *)data)) <= 0) {
-        handleErrors();
-    }
-    
-    encrypted = malloc(encrypted_length);
+    encryptedpair->ptext = malloc(strlen((char * ) data) + 1);
+    strcpy((char*)encryptedpair->ptext, (char* )data);
 
-    if (!encrypted) {
-        perror("Memory allocation failed");
-        return 1;
-    }
-    
-    // Perform the actual encryption
-    if (EVP_PKEY_encrypt(key->ctx, encrypted, &encrypted_length, data, strlen((char *)data)) <= 0) {
-        handleErrors();
-    }
-    
-    printf("Encrypted data length: %zu\n", encrypted_length);
-    
-    
-    change_ctx(key, key->privatekey);
-    
+    rsa_encrypt_pair(key, encryptedpair);
 
-    if (EVP_PKEY_decrypt_init(key->ctx) <= 0) {
-        handleErrors();
-    }
+    Ptext_ctext_pair* decryptedpair = init_rsa_pair();
+    decryptedpair->ctext = malloc(EVP_PKEY_get_size(key->publickey)); 
+    memcpy(decryptedpair->ctext, encryptedpair->ctext, EVP_PKEY_get_size(key->publickey)); 
+
+
+    rsa_decrypt_pair(key, decryptedpair);
+
+    printf("Decrypted Text: %s\n", decryptedpair->ptext);
+
     
-    // Determine the buffer size required for decrypted data
-    if (EVP_PKEY_decrypt(key->ctx, NULL, &decrypted_length, encrypted, ENCRYPTED_LENGTH) <= 0) {
-        handleErrors();
-    }
-    
-    decrypted = malloc(decrypted_length+1);
-    if (!decrypted) {
-        perror("Memory allocation failed");
-        return 1;
-    }
-    
-    // Perform the actual decryption
-    if (EVP_PKEY_decrypt(key->ctx, decrypted, &decrypted_length, encrypted, encrypted_length) <= 0) {
-        handleErrors();
-    }
-    decrypted[decrypted_length] = '\0';
-    
-    printf("Decrypted message: %s\n", decrypted);
-    
-    // Clean up
     free_rsa_key(key);
-    free(encrypted);
-    free(decrypted);
+    free_rsa_pair(decryptedpair);
+    free_rsa_pair(encryptedpair);
     
     return 0;
 }

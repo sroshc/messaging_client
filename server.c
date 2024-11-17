@@ -1,68 +1,127 @@
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 #include <arpa/inet.h>
 #include <openssl/ssl.h>
-#include <stdio.h>
-#include <string.h>
+#include <openssl/err.h>
+#include <pthread.h>
 
-#define crt "server.crt"
-#define KEY "server.key"
-#define PORT 8181
+#define PORT 8080
+#define SOCKETERROR (-1)
+#define SERVER_BACKLOG 10
 
-#define NOT_AUTHORIZED "NOT_AUTHORIZED"
-#define AUTHORIZED "AUTHORIZED"
-#define FAILED "FAILED"
-#define SUCCESS "SUCCESS"
+typedef struct{
+    int client_fd;
+    SSL_CTX* ctx;
+} t_client_args;
 
-int main(){
-    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+void init_openssl() {
+    SSL_load_error_strings();
+    OpenSSL_add_ssl_algorithms();
+}
 
-    struct sockaddr_in addr;
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(PORT);
-    addr.sin_addr.s_addr = INADDR_ANY;
+void cleanup_openssl() {
+    EVP_cleanup();
+}
 
+SSL_CTX *create_context() {
+    const SSL_METHOD *method = TLS_server_method();
+    SSL_CTX *ctx = SSL_CTX_new(method);
+    if (!ctx) {
+        perror("Creating SSL context failed.");
+        exit(1);
+    }
+    return ctx;
+}
 
+void configure_context(SSL_CTX *ctx) {
+    SSL_CTX_set_ecdh_auto(ctx, 1);
+    if (SSL_CTX_use_certificate_file(ctx, "lib/server.crt", SSL_FILETYPE_PEM) <= 0 ||
+        SSL_CTX_use_PrivateKey_file(ctx, "lib/server.key", SSL_FILETYPE_PEM) <= 0) {
+        perror("Configuring SSL context failed.");
+        exit(1);
+    }
+}
 
-    bind(sockfd, (struct sockaddr*)&addr, sizeof(addr));
-    listen(sockfd, 10);
-
-    struct sockaddr_in client_address;
-    int client_addrlen = sizeof(client_address);
-
-    int clientfd = accept(sockfd, (struct sockaddr *)&client_address, &client_addrlen);
-
-    SSL_CTX* ctx = SSL_CTX_new(TLS_server_method());
-    SSL* ssl = SSL_new(ctx);
-    SSL_set_fd(ssl, clientfd);
-    SSL_CTX_use_certificate_file(ctx, KEY, SSL_FILETYPE_PEM);
-    SSL_CTX_use_PrivateKey_file(ctx, KEY, SSL_FILETYPE_PEM);
-    SSL_accept(ssl);
-    char buffer[1024] = {0};
-    SSL_read(ssl, buffer, 1023);
-    // GET /file     
-    
-    char* file_request = buffer + 5;
-    char response[1024] = {0};
-    char* metadata = "HTTP/1.0 200 OK\r\nContent-Type: text/html\r\n\r\n";
-
-    memcpy(response, metadata, strlen(metadata));
-
-    if (strncmp(file_request, "index.html ", 11) == 0){
-        FILE *f = fopen("index.html", "r");
-        fread(response + strlen(metadata), 1024 - strlen(metadata)-1, 1, f);
-
-        fclose(f);
-        
-    }else{
-        char *error = "No page found";
-        memcpy(response + strlen(metadata), error, strlen(error));
+int check(int event, const char* msg){
+    if(event == SOCKETERROR){
+        perror(msg);
+        exit(1);
     }
 
-    SSL_write(ssl, response, 1024);
-
-    SSL_shutdown(ssl);
-
-
+    return event;
 }
+
+void *handle_connection(void *args_input){
+    t_client_args* client = (t_client_args *) args_input;
+    SSL *ssl = SSL_new(client->ctx);
+    SSL_set_fd(ssl, client->client_fd);
+
+    if (SSL_accept(ssl) <= 0) {
+        perror("SSL_accept failed.");
+    } else {
+        printf("SSL handshake completed\n");
+        SSL_write(ssl, "Hello, TLS client!", 19);
+    }
+
+    close(client->client_fd);
+    SSL_shutdown(ssl);
+    SSL_free(ssl);
+    free(client);
+
+    return NULL;
+}
+
+int main() {
+    int server_fd, client_fd;
+    struct sockaddr_in addr;
+    SSL_CTX *ctx;
+
+    init_openssl();
+    ctx = create_context();
+    configure_context(ctx);
+
+    server_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (server_fd < 0) {
+        perror("Socket creation failed");
+        exit(1);
+    }
+
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_port = htons(PORT);
+
+    check(bind(server_fd, (struct sockaddr *)&addr, sizeof(addr)), "Bind failed.");
+    check(listen(server_fd, 1), "Listen failed.");
+
+    printf("Listening on port %d...\n", PORT);
+
+    while(1){
+       check(client_fd = accept(server_fd, NULL, NULL), "Accept failed.");
+        
+        
+        pthread_t  t;
+        
+        t_client_args* args = malloc(sizeof(t_client_args));
+
+        if(args == NULL){
+            perror("Failed allocating memory for arguments.");
+            close(client_fd);
+            continue;
+        }        
+        
+        args->client_fd = client_fd;
+        args->ctx = ctx;
+
+        pthread_create(&t, NULL, handle_connection, args);
+        pthread_detach(t);
+
+    }
+
+    SSL_CTX_free(ctx);
+    close(server_fd);
+    cleanup_openssl();
+    return 0;
+}
+
