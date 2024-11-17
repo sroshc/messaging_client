@@ -5,6 +5,7 @@
 #include <openssl/sha.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include <pthread.h>
 
 #define USER_VALID 1
 #define USER_INVALD 0
@@ -19,6 +20,8 @@
 #define SALTLENGTH 16
 #define HASHLENGTH 32
 #define SALT_BASE64_LENGTH 25
+
+pthread_mutex_t g_db_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 void handleErrors(){
     fprintf(stderr, "Panic! Digest message failed\n");
@@ -215,6 +218,8 @@ sqlite3 *create_database(char* name){
 
 int add_user(sqlite3 *db, char *username, char *password){
     int rc;
+    pthread_mutex_lock(&g_db_mutex);
+
 
     unsigned char binary_salt[SALTLENGTH];
     RAND_bytes(binary_salt, SALTLENGTH);
@@ -252,6 +257,7 @@ int add_user(sqlite3 *db, char *username, char *password){
         free(final_hash);
         free(binary_hash);
         free(salt_and_pass);
+        pthread_mutex_unlock(&g_db_mutex);
         return FAIL;
     }
     sqlite3_bind_text(stmt, 1, username, -1, SQLITE_STATIC);
@@ -259,9 +265,11 @@ int add_user(sqlite3 *db, char *username, char *password){
     sqlite3_bind_text(stmt, 3, final_hash, -1, SQLITE_STATIC);
 
     rc = sqlite3_step(stmt);
+
     if (rc != SQLITE_DONE) {
         fprintf(stderr, "SQL error while adding new user: %s\n", sqlite3_errmsg(db));
         sqlite3_finalize(stmt);
+        pthread_mutex_unlock(&g_db_mutex);
         return FAIL;
     }
     sqlite3_finalize(stmt);
@@ -273,94 +281,87 @@ int add_user(sqlite3 *db, char *username, char *password){
     free(binary_hash);
     free(salt_and_pass);
 
+    pthread_mutex_unlock(&g_db_mutex);
     return SUCCESS;
 }
 
-int is_user_valid(sqlite3* db, char* username, char* password){
-    sqlite3_stmt *stmtpass;
-    sqlite3_stmt *stmtsalt;
-    int rcpass;
-    int rcsalt;
+int is_user_valid(sqlite3* db, char* username, char* password) {
+    sqlite3_stmt *stmtpass = NULL;
+    sqlite3_stmt *stmtsalt = NULL;
+    int result = VALIDATION_ERROR;
+    char *input_salt_and_pass = NULL;
+    unsigned char *input_hash = NULL;
+    char *final_input_hash = NULL;
+    
+    pthread_mutex_lock(&g_db_mutex);
+
     const char *sqlpass = "SELECT PASSWORD_HASH FROM USERS WHERE USERNAME = ?;";
     const char *sqlsalt = "SELECT PASSWORD_SALT FROM USERS WHERE USERNAME = ?;";
 
-    // Querying for the password hash
-    rcpass = sqlite3_prepare_v2(db, sqlpass, -1, &stmtpass, 0); 
 
-    if(rcpass != SQLITE_OK){
-        fprintf(stderr, "Failed to prepare statement for hashed password while validating login: %s\n", sqlite3_errmsg(db));
-        return VALIDATION_ERROR;
+    if (sqlite3_prepare_v2(db, sqlpass, -1, &stmtpass, 0) != SQLITE_OK) {
+        fprintf(stderr, "Failed to prepare statement for hashed password: %s\n", sqlite3_errmsg(db));
+        goto cleanup;
     }
 
     sqlite3_bind_text(stmtpass, 1, username, -1, SQLITE_STATIC);
+    int rcpass = sqlite3_step(stmtpass);
 
-    rcpass = sqlite3_step(stmtpass);
-
-    if(rcpass == 101){ //Fix this one day
-        return USER_DOESNT_EXIST;
+    if (rcpass == SQLITE_DONE) {  
+        result = USER_DOESNT_EXIST;
+        goto cleanup;
     }
 
-    if(rcpass != SQLITE_ROW){
-        printf("%d\n", rcpass);
-        fprintf(stderr, "Failed sqlite3_step() for rcpass while validating login: %s\n", sqlite3_errmsg(db));
-        sqlite3_finalize(stmtpass);
-        return VALIDATION_ERROR;
+    if (rcpass != SQLITE_ROW) {
+        fprintf(stderr, "Failed sqlite3_step() for rcpass: %s\n", sqlite3_errmsg(db));
+        goto cleanup;
     }
 
-    const char *actual_pass = sqlite3_column_text(stmtpass, 0);
+    const char *actual_pass = (const char *)sqlite3_column_text(stmtpass, 0);
 
-
-    // Querying for the password salt
-    rcsalt = sqlite3_prepare_v2(db, sqlsalt, -1, &stmtsalt, 0);
-
-    if(rcsalt != SQLITE_OK){
-        fprintf(stderr, "Failed to prepare statement for salt while validating login: %s\n", sqlite3_errmsg(db));
-        return VALIDATION_ERROR;
+    // Prepare salt statement
+    if (sqlite3_prepare_v2(db, sqlsalt, -1, &stmtsalt, 0) != SQLITE_OK) {
+        goto cleanup;
     }
 
     sqlite3_bind_text(stmtsalt, 1, username, -1, SQLITE_STATIC);
+    int rcsalt = sqlite3_step(stmtsalt);
 
-    rcsalt = sqlite3_step(stmtsalt);
-    
-    if(rcsalt != SQLITE_ROW){
-        fprintf(stderr, "Failed sqlite3_step() for rcsalt while validating login: %s\n", sqlite3_errmsg(db));
-        sqlite3_finalize(stmtpass);
-        sqlite3_finalize(stmtsalt);
-        return VALIDATION_ERROR;
+    if (rcsalt != SQLITE_ROW) {
+        fprintf(stderr, "Failed sqlite3_step() for rcsalt: %s\n", sqlite3_errmsg(db));
+        goto cleanup;
     }
 
-    const char *actual_salt = sqlite3_column_text(stmtsalt, 0);
+    const char *actual_salt = (const char *)sqlite3_column_text(stmtsalt, 0);
 
-    // Combine decoded salt with the password
+    // Calculate hash
     size_t input_salt_and_pass_len = strlen(actual_salt) + strlen(password) + 1;
-    char *input_salt_and_pass = malloc(input_salt_and_pass_len);
+    input_salt_and_pass = malloc(input_salt_and_pass_len);
+    if (!input_salt_and_pass) goto cleanup;
+    
     snprintf(input_salt_and_pass, input_salt_and_pass_len, "%s%s", actual_salt, password);
 
-    printf("Concatted pass and salt: %s\n", input_salt_and_pass);
-
-
-    unsigned char *input_hash;
     unsigned int input_hash_len = 0;
-    digest_message(input_salt_and_pass, strlen(input_salt_and_pass), &input_hash, &input_hash_len);
-
+    digest_message((unsigned char *)input_salt_and_pass, strlen(input_salt_and_pass), 
+                  &input_hash, &input_hash_len);
+    if (!input_hash) goto cleanup;
 
     size_t final_input_hash_len = 0;
-    char* final_input_hash = base64_encode(input_hash, input_hash_len, &final_input_hash_len);
+    final_input_hash = base64_encode(input_hash, input_hash_len, &final_input_hash_len);
+    if (!final_input_hash) goto cleanup;
 
-    printf("Computed Hash: %s\n", final_input_hash);
+    result = strcmp(final_input_hash, actual_pass) == 0 ? USER_VALID : USER_INVALD;
 
-    int result = strcmp(final_input_hash, actual_pass) == 0 ? USER_VALID : USER_INVALD;
-
-
-    // Clean up
-    sqlite3_finalize(stmtpass);
-    sqlite3_finalize(stmtsalt);
-    free(final_input_hash);
+cleanup:
+    if (stmtpass) sqlite3_finalize(stmtpass);
+    if (stmtsalt) sqlite3_finalize(stmtsalt);
     free(input_salt_and_pass);
     free(input_hash);
-
+    free(final_input_hash);
+    pthread_mutex_unlock(&g_db_mutex);
     return result;
 }
+
 
 bool does_user_exist(sqlite3 *db, char* username){
     const char* sql = "SELECT 1 FROM USERS WHERE USERNAME = ?";
@@ -411,7 +412,9 @@ int add_message(sqlite3 *db, int sender_id, int receiver_id, char *text){
     sqlite3_bind_int(stmt, 2, receiver_id);
     sqlite3_bind_text(stmt, 3, text, -1, SQLITE_STATIC);
 
+    pthread_mutex_lock(&g_db_mutex);
     rc = sqlite3_step(stmt);
+    pthread_mutex_unlock(&g_db_mutex);
 
     if(rc == INVALID_MESSAGE){
         sqlite3_finalize(stmt);
@@ -457,5 +460,101 @@ void close_db(sqlite3 *db){
     return;
 }
 
-//void digest_message(const unsigned char *message, size_t message_len, unsigned char **digest, unsigned int *digest_len)
+typedef struct user{
+    char* username;
+    char* password;
+    char* db_path;
+}User_ttest;
+
+void* add_user_thread(void* user){
+    User_ttest* userlocal = (User_ttest*)user;
+
+    sqlite3* db;
+    if (sqlite3_open(userlocal->db_path, &db) != SQLITE_OK) {
+        fprintf(stderr, "Cannot open database: %s\n", sqlite3_errmsg(db));
+        return NULL;
+    }
+
+    char curr_username[50];
+    for (int i = 0; i < 100; i++) {
+        memset(curr_username, 0, sizeof(curr_username));
+        sprintf(curr_username, "%s%d", userlocal->username, i);
+        add_user(db, curr_username, userlocal->password);
+    }
+
+    sqlite3_close(db);
+
+    return NULL;
+}
+
+void* check_user_thread(void* user){
+    User_ttest* userlocal = (User_ttest*)user;
+
+    sqlite3* db;
+    if (sqlite3_open(userlocal->db_path, &db) != SQLITE_OK) {
+        fprintf(stderr, "Cannot open database: %s\n", sqlite3_errmsg(db));
+        return NULL;
+    }
+
+    char curr_username[50];
+    for (int i = 0; i < 100; i++) {
+        memset(curr_username, 0, sizeof(curr_username));
+        sprintf(curr_username, "%s%d", userlocal->username, i);
+        if(is_user_valid(db, curr_username, userlocal->password) == USER_VALID){
+            printf("Valid: %s%d\n", userlocal->username,i);
+        }else{
+            printf("Invalid: %s%d\n", userlocal->username,i);
+
+        }
+    }
+
+    sqlite3_close(db);
+
+    return NULL;
+}
+void test_multi_threading(char* db_path){
+
+    pthread_t thread1, thread2;
+
+    User_ttest* user1 = malloc(sizeof(User_ttest));
+    user1->username = strdup("t1user");
+    user1->password = strdup("supersecretpassword");
+    user1->db_path = strdup("db");
+
+    User_ttest* user2 = malloc(sizeof(User_ttest));
+    user2->username = strdup("t2user");
+    user2->password = strdup("supersecretpassword");
+    user2->db_path = strdup("db");
+
+    pthread_create(&thread1, NULL, add_user_thread, user1);
+    pthread_create(&thread2, NULL, add_user_thread, user2);
+
+    pthread_join(thread1, NULL);
+    pthread_join(thread2, NULL);
+
+    pthread_t check_thread1, check_thread2;
+
+    pthread_create(&check_thread1, NULL, check_user_thread, user1);
+    pthread_create(&check_thread2, NULL, check_user_thread, user2);
+
+
+    pthread_join(check_thread1, NULL);
+    pthread_join(check_thread2, NULL);
+
+    free(user1->username);
+    free(user1->password);
+    free(user1->db_path);
+    free(user2->username);
+    free(user2->password);
+    free(user2->db_path);
+
+    return;
+}
+
+int main() {
+    create_database("db");
+    test_multi_threading("db");
+   
+}
+
 
