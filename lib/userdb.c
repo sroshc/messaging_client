@@ -293,7 +293,6 @@ int is_user_valid(sqlite3* db, char* username, char* password) {
     unsigned char *input_hash = NULL;
     char *final_input_hash = NULL;
     
-    pthread_mutex_lock(&g_db_mutex);
 
     const char *sqlpass = "SELECT PASSWORD_HASH FROM USERS WHERE USERNAME = ?;";
     const char *sqlsalt = "SELECT PASSWORD_SALT FROM USERS WHERE USERNAME = ?;";
@@ -319,7 +318,6 @@ int is_user_valid(sqlite3* db, char* username, char* password) {
 
     const char *actual_pass = (const char *)sqlite3_column_text(stmtpass, 0);
 
-    // Prepare salt statement
     if (sqlite3_prepare_v2(db, sqlsalt, -1, &stmtsalt, 0) != SQLITE_OK) {
         goto cleanup;
     }
@@ -327,14 +325,13 @@ int is_user_valid(sqlite3* db, char* username, char* password) {
     sqlite3_bind_text(stmtsalt, 1, username, -1, SQLITE_STATIC);
     int rcsalt = sqlite3_step(stmtsalt);
 
-    if (rcsalt != SQLITE_ROW) {
+    if (rcsalt != SQLITE_ROW){
         fprintf(stderr, "Failed sqlite3_step() for rcsalt: %s\n", sqlite3_errmsg(db));
         goto cleanup;
     }
 
     const char *actual_salt = (const char *)sqlite3_column_text(stmtsalt, 0);
 
-    // Calculate hash
     size_t input_salt_and_pass_len = strlen(actual_salt) + strlen(password) + 1;
     input_salt_and_pass = malloc(input_salt_and_pass_len);
     if (!input_salt_and_pass) goto cleanup;
@@ -358,8 +355,90 @@ cleanup:
     free(input_salt_and_pass);
     free(input_hash);
     free(final_input_hash);
-    pthread_mutex_unlock(&g_db_mutex);
     return result;
+}
+
+int get_messages(sqlite3* db, int user1_id, int user2_id, char*** messages, int* message_count) {
+    const char* sql = 
+        "SELECT CONTENT FROM MESSAGES "
+        "WHERE (SENDER_ID = ? AND RECEIVER_ID = ?) "
+        "   OR (SENDER_ID = ? AND RECEIVER_ID = ?) "
+        "ORDER BY TIMESTAMP ASC";
+
+    sqlite3_stmt* stmt = NULL;
+    int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, 0);
+    if (rc != SQLITE_OK) {
+        fprintf(stderr, "Failed to prepare statement in get_messages: %s\n", sqlite3_errmsg(db));
+        return FAIL;
+    }
+
+    sqlite3_bind_int(stmt, 1, user1_id);
+    sqlite3_bind_int(stmt, 2, user2_id);
+    sqlite3_bind_int(stmt, 3, user2_id);
+    sqlite3_bind_int(stmt, 4, user1_id);
+
+    char** temp_messages = NULL;
+    int count = 0;
+
+    while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+        const char* message = (const char*)sqlite3_column_text(stmt, 0);
+        if (!message) continue;
+
+        char* new_message = strdup(message);
+        if (!new_message) {
+            fprintf(stderr, "Memory allocation failed in get_messages\n");
+            rc = FAIL;
+
+            goto cleanup;
+        }
+
+        char** resized = realloc(temp_messages, (count + 1) * sizeof(char*));
+        if (!resized) {
+            fprintf(stderr, "Memory reallocation failed in get_messages\n");
+            free(new_message);
+            rc = FAIL;
+
+            goto cleanup;
+        }
+
+        temp_messages = resized;
+        temp_messages[count++] = new_message;
+    }
+
+    if (rc != SQLITE_DONE) {
+        fprintf(stderr, "SQL error in get_messages: %s\n", sqlite3_errmsg(db));
+        rc = FAIL;
+
+        goto cleanup;
+    }
+
+    *messages = temp_messages;
+    *message_count = count;
+    sqlite3_finalize(stmt);
+    return SUCCESS;
+
+cleanup:
+    for (int i = 0; i < count; ++i) {
+        free(temp_messages[i]);
+    }
+
+
+    free(temp_messages);
+    *messages = NULL;
+    *message_count = 0;
+    sqlite3_finalize(stmt);
+    return rc;
+}
+
+void free_messages(char** messages, int message_count) {
+    if (messages == NULL) {
+        return;
+    }
+
+    for (int i = 0; i < message_count; i++) {
+        free(messages[i]); 
+    }
+    free(messages);
 }
 
 
@@ -396,15 +475,51 @@ bool does_user_exist(sqlite3 *db, char* username){
 
 }
 
-int add_message(sqlite3 *db, int sender_id, int receiver_id, char *text){
-    const char *sql = "INSERT INTO MESSAGES (SENDER_ID, RECEIVER_ID, CONTENT) VALUES (?, ?, ?)";
-    sqlite3_stmt* stmt;
+int get_user_id(sqlite3* db, char* username){
+    const char* sql = "SELECT ID FROM USERS WHERE USERNAME = ?";
+    sqlite3_stmt *stmt;
     int rc;
 
     rc = sqlite3_prepare_v2(db, sql, -1, &stmt, 0);
 
     if(rc != SQLITE_OK){
+        fprintf(stderr, "Failed perparing SQL statement for get_user_id(): %s\n", sqlite3_errmsg(db));
+        sqlite3_finalize(stmt);
+        return -1;
+    }
+
+    sqlite3_bind_text(stmt, 1, username, -1, SQLITE_STATIC);
+
+    rc = sqlite3_step(stmt);
+
+    if(rc == SQLITE_DONE){
+        sqlite3_finalize(stmt);
+        return -1;
+    }
+    
+    if(rc != SQLITE_ROW){
+        fprintf(stderr, "Failed sqlite3_step() in get_user_id(): %s\n", sqlite3_errmsg(db));
+        sqlite3_finalize(stmt);
+        return -1;
+    }
+
+    int res = sqlite3_column_int(stmt, 0);
+    sqlite3_finalize(stmt);
+    
+    return res;
+}
+
+int add_message(sqlite3 *db, int sender_id, int receiver_id, char *text){
+    const char *sql = "INSERT INTO MESSAGES (SENDER_ID, RECEIVER_ID, CONTENT) VALUES (?, ?, ?)";
+    sqlite3_stmt* stmt;
+    int rc;
+    pthread_mutex_lock(&g_db_mutex);
+
+    rc = sqlite3_prepare_v2(db, sql, -1, &stmt, 0);
+
+    if(rc != SQLITE_OK){
         fprintf(stderr, "Failed preparing SQL statement for add_message(): %s\n", sqlite3_errmsg(db));
+        pthread_mutex_unlock(&g_db_mutex);
         return FAIL;
     }
 
@@ -412,24 +527,27 @@ int add_message(sqlite3 *db, int sender_id, int receiver_id, char *text){
     sqlite3_bind_int(stmt, 2, receiver_id);
     sqlite3_bind_text(stmt, 3, text, -1, SQLITE_STATIC);
 
-    pthread_mutex_lock(&g_db_mutex);
     rc = sqlite3_step(stmt);
-    pthread_mutex_unlock(&g_db_mutex);
 
     if(rc == INVALID_MESSAGE){
         sqlite3_finalize(stmt);
+        pthread_mutex_unlock(&g_db_mutex);
         return FAIL;
     }
 
     if(rc != SQLITE_OK && rc != NO_ROW_AVAILABLE){
         fprintf(stderr, "Failed sqlite3_step() in add_message(): %s\n", sqlite3_errmsg(db));
         sqlite3_finalize(stmt);
+        pthread_mutex_unlock(&g_db_mutex);
         return FAIL;
     }
 
     sqlite3_finalize(stmt);
+    pthread_mutex_unlock(&g_db_mutex);
     return SUCCESS;
 }
+
+
 
 int print_all(sqlite3 *db, char* table){
     char *zErrMsg;
@@ -552,9 +670,38 @@ void test_multi_threading(char* db_path){
 }
 
 int main() {
-    create_database("db");
-    test_multi_threading("db");
-   
+    sqlite3* db = create_database("db");
+    
+    add_user(db, "user1", "pass1");
+    add_user(db, "user2", "pass2");
+    add_user(db, "user3", "pass3");
+
+    add_message(db, get_user_id(db, "user1"), get_user_id(db, "user2"), "heyyyyyyyyyyyyy");
+    add_message(db, get_user_id(db, "user2"), get_user_id(db, "user1"), "heyyyyyyyyyy");
+    add_message(db, get_user_id(db, "user1"), get_user_id(db, "user2"), "heyyyyyyyy");
+    add_message(db, get_user_id(db, "user2"), get_user_id(db, "user1"), "heyyyyyy");
+    add_message(db, get_user_id(db, "user1"), get_user_id(db, "user2"), "heyyy");
+    add_message(db, get_user_id(db, "user2"), get_user_id(db, "user1"), "heyy");
+
+    print_all(db, "MESSAGES");
+
+    char** messages;
+    int messages_num;
+
+
+    get_messages(db, 1, 2, &messages, &messages_num);
+
+    for(int i = 0; i < messages_num; i++){
+        printf("%s\n", messages[i]);
+    }
+
+    printf("Messages number: %d\n", messages_num);
+
+
+
+
+    return 0;
+
 }
 
 
