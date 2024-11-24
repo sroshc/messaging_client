@@ -1,4 +1,4 @@
-#include "termlib.h"
+#include "../include/termlib.h"
 #include <stdio.h>
 #include <string.h>
 #include <termios.h>

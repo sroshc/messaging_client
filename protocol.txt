@@ -1,14 +1,15 @@
 Format for client:
     <SESSION_TOKEN>/<COMMAND>/<JSON_ARGUEMENTS>
 
-The session token can be "NULL" if the user is making an account or logging in
+The session token can be left out if the user is making an account or logging in:
+    /<COMMAND>/<JSON_ARGUEMENTS>
 
 Server response:
     <RESPONSE_CODE>/<JSON_DATA>
 
 Server response codes: 
     NOT_AUTHORIZED = 401
-    AUTHORIZED = 200
+    AUTHORIZED = 201
     BAD_REQUEST = 400
     SERVER_FAILED = 500
     SUCCESS = 200

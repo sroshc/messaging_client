@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <pthread.h>
+#include "../include/userdb.h"
 
 #define USER_VALID 1
 #define USER_INVALD 0
