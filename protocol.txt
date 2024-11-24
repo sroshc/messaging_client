@@ -1,11 +1,24 @@
 Format for client:
-    <SESSION_TOKEN>/<COMMAND>/<JSON_ARGUEMENTS>
 
-The session token can be left out if the user is making an account or logging in:
-    /<COMMAND>/<JSON_ARGUEMENTS>
+{
+    "session_token": "string|null",   // Can be left out if user is making account or logging in
+    "command": "string",             // The command to execute
+    "arguments": {                   // Additional arguments for the command
+        "key1": "value1",
+        "key2": "value2"
+    }
+}
+
+-----------------------------------------------------------------------------
 
 Server response:
-    <RESPONSE_CODE>/<JSON_DATA>
+{
+    "response_code": 200,       //Server response, see list bellow
+    "data": {
+        "key1": "value1",
+        "key2": "value2"
+    }
+}
 
 Server response codes: 
     NOT_AUTHORIZED = 401
