@@ -69,7 +69,7 @@ void *handle_connection(void *args_input){
     SSL_shutdown(ssl);
     SSL_free(ssl);
     free(client);
-
+    
     return NULL;
 }
 
@@ -97,9 +97,16 @@ int main() {
 
     printf("Listening on port %d...\n", PORT);
 
+    socklen_t socklen;
+    struct sockaddr_in client_addr;
+
     while(1){
-       check(client_fd = accept(server_fd, NULL, NULL), "Accept failed.");
+        check(client_fd = accept(server_fd, (struct sockaddr *) &client_addr, &socklen), "Accept failed.");
         
+        char client_ip[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, INET_ADDRSTRLEN);
+
+        printf("Connection from %s\n", client_ip);
         
         pthread_t  t;
         

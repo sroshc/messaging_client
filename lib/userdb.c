@@ -630,19 +630,21 @@ void* check_user_thread(void* user){
 
     return NULL;
 }
-void test_multi_threading(char* db_path){
-
+void test_multi_threading(){
+    const char *db_name = "temp_db"; 
     pthread_t thread1, thread2;
+
+    create_database((char *)db_name);
 
     User_ttest* user1 = malloc(sizeof(User_ttest));
     user1->username = strdup("t1user");
     user1->password = strdup("supersecretpassword");
-    user1->db_path = strdup("db");
+    user1->db_path = strdup(db_name);
 
     User_ttest* user2 = malloc(sizeof(User_ttest));
     user2->username = strdup("t2user");
     user2->password = strdup("supersecretpassword");
-    user2->db_path = strdup("db");
+    user2->db_path = strdup(db_name);
 
     pthread_create(&thread1, NULL, add_user_thread, user1);
     pthread_create(&thread2, NULL, add_user_thread, user2);
@@ -666,10 +668,14 @@ void test_multi_threading(char* db_path){
     free(user2->password);
     free(user2->db_path);
 
+    if(remove(db_name) != 0){
+        printf("Failed to remove %s\n.", db_name);
+    }
+
     return;
 }
 
-int main() {
+int main(){
     sqlite3* db = create_database("db");
     
     add_user(db, "user1", "pass1");
@@ -695,13 +701,14 @@ int main() {
         printf("%s\n", messages[i]);
     }
 
+    free_messages(messages, messages_num);
+
     printf("Messages number: %d\n", messages_num);
 
 
-
+    test_multi_threading();
 
     return 0;
-
 }
 
 

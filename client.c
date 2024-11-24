@@ -5,6 +5,7 @@
 #include <arpa/inet.h>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
+#include "lib/termlib.h"
 
 #define SERVER_ADDR "127.0.0.1"
 #define PORT 8080
@@ -29,6 +30,10 @@ SSL_CTX *create_context() {
 }
 
 int main() {
+    switch_alternate_screen();
+    clear_screen();
+    disable_canonical();
+
     int sock;
     struct sockaddr_in server_addr;
     SSL_CTX *ctx;
