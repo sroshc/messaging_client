@@ -2,18 +2,29 @@ Format for client:
 
 {
     "session_token": "string|null",   // Can be left out if user is making account or logging in
-    "command": "string",             // The command to execute
+    "command": "string",             // The command to executed, see list below
     "arguments": {                   // Additional arguments for the command
         "key1": "value1",
         "key2": "value2"
     }
 }
 
+Commands currently available:
+    LOGIN:
+        Expects "username" and "password"
+    MAKE_ACCOUNT:
+        Expects "username" and "password"
+    SEND_MESSAGE:  
+        Expects "recipient_id" and "content"
+
+    
+
+
 -----------------------------------------------------------------------------
 
 Server response:
 {
-    "response_code": 200,       //Server response, see list bellow
+    "response_code": 200,       //Server response, see list below
     "data": {
         "key1": "value1",
         "key2": "value2"
