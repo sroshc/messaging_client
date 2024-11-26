@@ -6,6 +6,12 @@
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 #include <pthread.h>
+#include <sqlite3.h>
+
+#include "include/parser.h"
+#include "include/userdb.h"
+#include "include/termlib.h"
+#include "include/hash.h"
 
 #define PORT 8080
 #define SOCKETERROR (-1)
