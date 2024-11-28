@@ -6,19 +6,19 @@ TARGET = server
 all: $(TARGET)
 
 $(TARGET): $(OBJ)
-	$(CC) $(CFLAGS) -o $(TARGET) $(OBJ) -l sqlite3
+	$(CC) $(CFLAGS) -o $(TARGET) $(OBJ) -l sqlite3 -l json-c -l ssl -l crypto 
 
-server.o: driver.c lib/wordlib.h
-	$(CC) $(CFLAGS) -c driver.c
+server.o: server.c 
+	$(CC) $(CFLAGS) -c server.c
+
+userdb.o: lib/src/userdb.c lib/include/userdb.h
+	$(CC) $(CFLAGS) -c lib/src/userdb.c 
 
 hash.o: lib/src/hash.c lib/include/hash.h
-	$(CC) $(CFLAGS) -c lib/word.c 
+	$(CC) $(CFLAGS) -c lib/src/hash.c
 
-term.o: lib/term.c lib/termlib.h
-	$(CC) $(CFLAGS) -c lib/term.c
-
-worddb.o: lib/worddb.c lib/worddblib.h
-	$(CC) $(CFLAGS) -c lib/worddb.c
+parser.o: lib/src/parser.c lib/include/parser.h
+	$(CC) $(CFLAGS) -c lib/src/parser.c
 
 clean:
 	rm -f $(OBJ) $(TARGET)

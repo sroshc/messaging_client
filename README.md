@@ -5,3 +5,6 @@
 - Realtime messaging
 - GUI interface
 
+# Current Requirements
+- json-c
+- uthash
