@@ -64,7 +64,7 @@ void delete_session(int id){
     return;
 }
 
-void test(){
+void test_hash_table(){
     init_session_keys();
 
     add_session(1, "hello");

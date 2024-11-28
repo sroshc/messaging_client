@@ -676,40 +676,40 @@ void test_multi_threading(){
     return;
 }
 
-int main(){
-    sqlite3* db = create_database("db");
+// int main(){
+//     sqlite3* db = create_database("db");
     
-    add_user(db, "user1", "pass1");
-    add_user(db, "user2", "pass2");
-    add_user(db, "user3", "pass3");
+//     add_user(db, "user1", "pass1");
+//     add_user(db, "user2", "pass2");
+//     add_user(db, "user3", "pass3");
 
-    add_message(db, get_user_id(db, "user1"), get_user_id(db, "user2"), "heyyyyyyyyyyyyy");
-    add_message(db, get_user_id(db, "user2"), get_user_id(db, "user1"), "heyyyyyyyyyy");
-    add_message(db, get_user_id(db, "user1"), get_user_id(db, "user2"), "heyyyyyyyy");
-    add_message(db, get_user_id(db, "user2"), get_user_id(db, "user1"), "heyyyyyy");
-    add_message(db, get_user_id(db, "user1"), get_user_id(db, "user2"), "heyyy");
-    add_message(db, get_user_id(db, "user2"), get_user_id(db, "user1"), "heyy");
+//     add_message(db, get_user_id(db, "user1"), get_user_id(db, "user2"), "heyyyyyyyyyyyyy");
+//     add_message(db, get_user_id(db, "user2"), get_user_id(db, "user1"), "heyyyyyyyyyy");
+//     add_message(db, get_user_id(db, "user1"), get_user_id(db, "user2"), "heyyyyyyyy");
+//     add_message(db, get_user_id(db, "user2"), get_user_id(db, "user1"), "heyyyyyy");
+//     add_message(db, get_user_id(db, "user1"), get_user_id(db, "user2"), "heyyy");
+//     add_message(db, get_user_id(db, "user2"), get_user_id(db, "user1"), "heyy");
 
-    print_all(db, "MESSAGES");
+//     print_all(db, "MESSAGES");
 
-    char** messages;
-    int messages_num;
-
-
-    get_messages(db, 1, 2, &messages, &messages_num);
-
-    for(int i = 0; i < messages_num; i++){
-        printf("%s\n", messages[i]);
-    }
-
-    free_messages(messages, messages_num);
-
-    printf("Messages number: %d\n", messages_num);
+//     char** messages;
+//     int messages_num;
 
 
-    test_multi_threading();
+//     get_messages(db, 1, 2, &messages, &messages_num);
 
-    return 0;
-}
+//     for(int i = 0; i < messages_num; i++){
+//         printf("%s\n", messages[i]);
+//     }
+
+//     free_messages(messages, messages_num);
+
+//     printf("Messages number: %d\n", messages_num);
+
+
+//     test_multi_threading();
+
+//     return 0;
+// }
 
 
