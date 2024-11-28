@@ -7,11 +7,13 @@
 #include <openssl/err.h>
 #include <pthread.h>
 #include <sqlite3.h>
+#include "uthash.h"
+#include <stdbool.h>
 
-#include "include/parser.h"
-#include "include/userdb.h"
-#include "include/termlib.h"
-#include "include/hash.h"
+#include "lib/include/parser.h"
+#include "lib/include/userdb.h"
+#include "lib/include/termlib.h"
+#include "lib/include/hash.h"
 
 #define PORT 8080
 #define SOCKETERROR (-1)
@@ -43,8 +45,8 @@ SSL_CTX *create_context() {
 
 void configure_context(SSL_CTX *ctx) {
     SSL_CTX_set_ecdh_auto(ctx, 1);
-    if (SSL_CTX_use_certificate_file(ctx, "lib/server.crt", SSL_FILETYPE_PEM) <= 0 ||
-        SSL_CTX_use_PrivateKey_file(ctx, "lib/server.key", SSL_FILETYPE_PEM) <= 0) {
+    if (SSL_CTX_use_certificate_file(ctx, "lib/keys/server.crt", SSL_FILETYPE_PEM) <= 0 ||
+        SSL_CTX_use_PrivateKey_file(ctx, "lib/keys/server.key", SSL_FILETYPE_PEM) <= 0) {
         perror("Configuring SSL context failed.");
         exit(1);
     }
