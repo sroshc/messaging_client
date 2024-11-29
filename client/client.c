@@ -5,7 +5,6 @@
 #include <arpa/inet.h>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
-#include "lib/termlib.h"
 
 #define SERVER_ADDR "127.0.0.1"
 #define PORT 8080
@@ -30,10 +29,6 @@ SSL_CTX *create_context() {
 }
 
 int main() {
-    switch_alternate_screen();
-    clear_screen();
-    disable_canonical();
-
     int sock;
     struct sockaddr_in server_addr;
     SSL_CTX *ctx;
@@ -65,13 +60,15 @@ int main() {
     } else {
         printf("SSL handshake completed\n");
 
-        char buffer[256];
-        SSL_read(ssl, buffer, sizeof(buffer) - 1);
-        printf("Received: %s\n", buffer);
-    }
+        char write_buffer[256];
+        scanf("%s", write_buffer);
 
-    SSL_shutdown(ssl);
+        SSL_write(ssl, write_buffer, sizeof(write_buffer) - 1);
+        printf("Wrote: %s\n", write_buffer);
+    }
+    
     close(sock);
+    SSL_shutdown(ssl);
     SSL_free(ssl);
     SSL_CTX_free(ctx);
     cleanup_openssl();
