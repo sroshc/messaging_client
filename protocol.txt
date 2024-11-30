@@ -36,6 +36,7 @@ Server response codes:
     AUTHORIZED = 201
     BAD_REQUEST = 400
     SERVER_FAILED = 500
+    SERVER_FULL = 501
     SUCCESS = 200
 
 NOT_AUTHORIZED returns when the session_token isn't present or is invalid
