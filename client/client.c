@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <signal.h>
+#include <pthread.h>
 #include <arpa/inet.h>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
@@ -37,6 +38,25 @@ void clear_input_buffer() {
 void handle_SIGPIPE(int err){
     fprintf(stderr, "Received SIGPIPE. Likely the connection was closed.\n");
     return;
+}
+
+typedef struct{
+    SSL* ssl;
+} server_ssl_args;
+
+void* handle_server_responses(void* ssl){
+    server_ssl_args *server_args = (server_ssl_args *) ssl; 
+    char receive_buffer[4096];
+
+    while(1){
+        int res = SSL_read(server_args->ssl, receive_buffer, sizeof(receive_buffer) -1);
+        if(res <= 0){
+            return NULL;
+        }
+        receive_buffer[sizeof(receive_buffer) - 1] = '\0';
+
+        printf("Server sent: %s\n", receive_buffer);
+    }
 }
 
 int main() {
@@ -75,23 +95,46 @@ int main() {
         printf("SSL handshake completed\n");
     }
 
-    char write_buffer[256];
+    pthread_t read_thread;
 
-    while(1){
-        printf("Write: ");
+    server_ssl_args *server_ssl;
+
+    server_ssl = malloc(sizeof(server_ssl_args));
+    server_ssl->ssl = ssl;
+
+    pthread_create(&read_thread, NULL, handle_server_responses, server_ssl);
+    pthread_detach(read_thread);
+
+    FILE* file;
+    char write_buffer[4096];
+    char filename[256];
+
+    while(1) {
+        printf("File to write: ");
         fflush(stdout);
-        scanf("%s", write_buffer);
+        scanf("%s", filename);  
 
-        ssize_t write_result = SSL_write(ssl, write_buffer, strlen(write_buffer));
-        if (write_result <= 0) {
-            int err = SSL_get_error(ssl, write_result);
-            fprintf(stderr, "SSL write error: %d\n", err);
-            break;
+        file = fopen(filename, "rb");  
+        if (file == NULL) {
+            printf("File \"%s\" does not exist.\n", filename);
+            continue;
         }
 
-        printf("Wrote: %s\n", write_buffer);
-        memset(write_buffer, 0, sizeof(write_buffer));
+        size_t read_size;
+        while ((read_size = fread(write_buffer, 1, sizeof(write_buffer), file)) > 0) {
+            ssize_t write_result = SSL_write(ssl, write_buffer, read_size);
+            if (write_result <= 0) {
+                int err = SSL_get_error(ssl, write_result);
+                fprintf(stderr, "SSL write error: %d\n", err);
+                goto disconnect;
+            }
+            printf("Wrote: %.*s\n", (int)read_size, write_buffer);
+        }
+
+        fclose(file);
     }
+
+    disconnect:
     
 
     if(SSL_shutdown(ssl) == 0){
