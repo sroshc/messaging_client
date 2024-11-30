@@ -89,7 +89,8 @@ void configure_context(SSL_CTX *ctx) {
     }
 }
 
-int check(int event, const char* msg){
+// Should only be used with functions with possible critical errors 
+int check(int event, const char* msg){  
     if(event == SOCKETERROR){
         perror(msg);
         exit(1);
@@ -187,7 +188,21 @@ void handle_SIGPIPE(int err){
 
 void quit_handler(int err){
     printf("Shutting down server...\n");
+
+    pthread_mutex_lock(&connections_mutex);
+    for(int i = 0; i < MAX_CLIENTS; i++){
+        if(client_fds[i] != -1){
+            close(client_fds[i]);
+        }
+    }
+    pthread_mutex_unlock(&connections_mutex);
+
+    printf("Closed all client connections.\n");
+
     close(server_fd);
+
+    printf("Stopped listening for new connections.\n");
+
     SERVER_STATUS = SERVER_OFFLINE;
     
 }
@@ -228,8 +243,14 @@ int main() {
     int thread_index;
 
     while(SERVER_STATUS == SERVER_ONLINE){
-        check(client_fd = accept(server_fd, (struct sockaddr *) &client_addr, &socklen), "Accept failed ");
+        int accept_result = client_fd = accept(server_fd, (struct sockaddr *) &client_addr, &socklen);
         
+        if(accept_result == SOCKETERROR){
+            printf("Breaking out of listening loop\n");
+            break;
+        }
+
+
         thread_index = -1;
         for(int i = 0; i < MAX_CLIENTS; i++){
             if(client_fds[i] == -1){
@@ -280,7 +301,6 @@ int main() {
     }
 
     SSL_CTX_free(ctx);
-    close(server_fd);
     cleanup_openssl();
     return 0;
 }
