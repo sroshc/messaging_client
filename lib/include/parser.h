@@ -33,6 +33,6 @@ int get_command_int(const char* string_command);
 
 
 /* Returns the command enum, and returns -1 if the json_string is invalid. Also dynamicaly stores the new json_object*/
-int get_command(char* json_string, json_object* object);
+int get_command(char* json_string, json_object** object);
 
 #endif

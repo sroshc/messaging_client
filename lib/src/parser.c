@@ -22,18 +22,18 @@ int get_command_int(const char* string_command){
     return -1;
 }
 
-int get_command(char* json_string, json_object* object){
-    object = json_tokener_parse(json_string);
+int get_command(char* json_string, json_object** object){
+    *object = json_tokener_parse(json_string);
 
     if(object == NULL){
         return INVALID;
     }
 
     json_object *json_command;
-    json_object_object_get_ex(object, COMMAND, &json_command);
+    json_object_object_get_ex(*object, COMMAND, &json_command);
 
     if(json_command == NULL){
-        json_object_put(object);
+        json_object_put(*object);
         return INVALID;
     }
 
@@ -50,10 +50,12 @@ void test(){
 
     json_object *object;
 
-    int x = get_command(json_string, object);
+    int x = get_command(json_string, & object);
 
     if(x == MAKE_ACCOUNT){
         printf("Success\n");
     }
     printf("%d\n", x);
+
+    json_object_put(object);
 }
