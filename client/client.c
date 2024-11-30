@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <string.h>
+#include <signal.h>
 #include <arpa/inet.h>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
@@ -28,7 +30,18 @@ SSL_CTX *create_context() {
     return ctx;
 }
 
+void clear_input_buffer() {
+    while (getchar() != '\n' && getchar() != EOF);
+}
+
+void handle_SIGPIPE(int err){
+    fprintf(stderr, "Received SIGPIPE. Likely the connection was closed.\n");
+    return;
+}
+
 int main() {
+    signal(SIGPIPE, handle_SIGPIPE); // investigate deeper into this one day lol
+
     int sock;
     struct sockaddr_in server_addr;
     SSL_CTX *ctx;
@@ -57,20 +70,39 @@ int main() {
 
     if (SSL_connect(ssl) <= 0) {
         perror("SSL_connect failed");
+        goto cleanup;
     } else {
         printf("SSL handshake completed\n");
+    }
 
-        char write_buffer[256];
+    char write_buffer[256];
+
+    while(1){
+        printf("Write: ");
+        fflush(stdout);
         scanf("%s", write_buffer);
 
-        SSL_write(ssl, write_buffer, sizeof(write_buffer) - 1);
+        ssize_t write_result = SSL_write(ssl, write_buffer, strlen(write_buffer));
+        if (write_result <= 0) {
+            int err = SSL_get_error(ssl, write_result);
+            fprintf(stderr, "SSL write error: %d\n", err);
+            break;
+        }
+
         printf("Wrote: %s\n", write_buffer);
+        memset(write_buffer, 0, sizeof(write_buffer));
     }
     
-    close(sock);
-    SSL_shutdown(ssl);
-    SSL_free(ssl);
-    SSL_CTX_free(ctx);
-    cleanup_openssl();
-    return 0;
+
+    if(SSL_shutdown(ssl) == 0){
+        SSL_shutdown(ssl);
+    }
+
+    cleanup:
+        close(sock);
+        SSL_free(ssl);
+        SSL_CTX_free(ctx);
+        cleanup_openssl();
+        printf("Client closed\n");
+        return 0;
 }
