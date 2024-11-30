@@ -7,9 +7,11 @@
 #include <openssl/err.h>
 #include <pthread.h>
 #include <sqlite3.h>
-#include "uthash.h"
 #include <stdbool.h>
 #include <signal.h>
+
+#include "uthash.h"
+#include <json-c/json.h>
 
 #include "lib/include/parser.h"
 #include "lib/include/userdb.h"
@@ -21,6 +23,11 @@
 #define SERVER_BACKLOG 10
 #define MAX_CLIENTS 100
 
+char *S_SERVER_FAILURE = "{\"response_code\": 500}";
+char *S_SERVER_SUCCESS = "{\"response_code\": 200}";
+char *S_BAD_REQUEST = "{\"response_code\": 400}";
+
+
 int server_fd; // Global server file descriptor so signal function can shut it down
 pthread_t client_threads[MAX_CLIENTS]; // Holds all handle_connection() threads
 int client_fds[MAX_CLIENTS] = {-1};   // Holds all currently connected client sockets
@@ -31,9 +38,7 @@ pthread_mutex_t connections_mutex = PTHREAD_MUTEX_INITIALIZER;
 #define SERVER_OFFLINE 0
 int SERVER_STATUS = SERVER_ONLINE;
 
-const char* DATABASE_NAME = "db";
-
-
+char* DATABASE_NAME = "db";
 
 typedef struct{
     int client_fd;
@@ -114,37 +119,126 @@ void handle_errors(int err){
     ERR_print_errors_fp(stderr);
 }
 
+int j_add_user(sqlite3* db, json_object* jobject){
+    int res = BAD_REQUEST;
+    json_object* arguments = NULL;
+    
+    json_object_object_get_ex(jobject, ARGUMENTS, &arguments);
+
+    if(arguments == NULL){
+        goto cleanup;
+    }
+    
+
+    /* Grab username from json */
+    char* username = NULL;
+    json_object* j_username = NULL;
+
+    json_object_object_get_ex(arguments, USERNAME, &j_username);
+    if(j_username == NULL){
+        goto cleanup;
+    }
+
+    username = json_object_get_string(j_username);
+    if(username == NULL){
+        goto cleanup;
+    }
+    
+
+    /* Grab password from json */
+    char* password = NULL;
+    json_object* j_password = NULL;
+
+    json_object_object_get_ex(arguments, PASSWORD, &j_password);
+    if(j_password == NULL){
+        goto cleanup;
+    }
+
+    password = json_object_get_string(j_password);
+    if(password == NULL){
+        goto cleanup;
+    }
+
+
+
+    int rc;
+    rc = add_user(db, username, password);
+
+    if(rc == DB_SUCCESS){
+        res = SUCCESS;
+    }
+
+    cleanup:
+        if(arguments) json_object_put(arguments);
+        if(j_username) json_object_put(j_username);
+        if(j_password) json_object_put(j_password);
+        return res;
+}
+
 void *handle_connection(void *args_input){
     t_client_args* client = (t_client_args *) args_input;
     SSL *ssl = SSL_new(client->ctx);
     SSL_set_fd(ssl, client->client_fd);
     char client_ip[INET_ADDRSTRLEN];
     inet_ntop(AF_INET, &client->client_sockaddr.sin_addr, client_ip, INET_ADDRSTRLEN);
-
+    
     if (SSL_accept(ssl) <= 0) {
         unsigned long err_code = ERR_get_error();
         fprintf(stderr, "SSL handshake failed with %s: %s\n", client_ip, ERR_error_string(err_code, NULL));
         goto cleanup;
     } else {
         printf("SSL handshake completed with %s\n", client_ip);
+        SSL_write(ssl, S_SERVER_SUCCESS, strlen(S_SERVER_SUCCESS));
+    }
+
+    sqlite3* db = NULL; 
+    int rc;
+    
+    rc = sqlite3_open(DATABASE_NAME, &db);
+
+    if(rc != SQLITE_OK){
+        SSL_write(ssl, S_SERVER_FAILURE, strlen(S_SERVER_FAILURE));
+        goto cleanup;
     }
     
     char receive_buffer[4096];
+    json_object * jobject = NULL;
     int bytes_read = 0;
     int command;
 
-    while(SERVER_STATUS == SERVER_ONLINE && (bytes_read = SSL_read(ssl, receive_buffer, sizeof(receive_buffer) - 1)) > 0){   
+    while(SERVER_STATUS == SERVER_ONLINE && (bytes_read = SSL_read(ssl, receive_buffer, sizeof(receive_buffer) - 1)) > 0){   //TODO: fix
         receive_buffer[bytes_read] = '\0';
         if(bytes_read <= 0){
             int err = SSL_get_error(ssl, bytes_read);
             handle_errors(err);
             break;
         }
+        
+        command = get_command(receive_buffer, &jobject);
+        
+        
+
+        switch(command){
+            case MAKE_ACCOUNT:
+                if(j_add_user(db, jobject) == SUCCESS){
+                    SSL_write(ssl, S_SERVER_SUCCESS, strlen(S_SERVER_SUCCESS));
+                }else{
+                    SSL_write(ssl, S_BAD_REQUEST, strlen(S_BAD_REQUEST));
+                }
+                break;
+            default:
+                SSL_write(ssl, S_BAD_REQUEST, strlen(S_BAD_REQUEST));
+        }
+        
         printf("Read from client %s: %s\n", client_ip, receive_buffer);
+        print_all(db, "USERS");
     }
 
 
     cleanup:
+        if(db) sqlite3_close(db);
+        json_object_put(jobject);
+
         pthread_mutex_lock(&connections_mutex);
         client_fds[client->thread_index] = -1;
         if(SSL_shutdown(ssl) == 0){
