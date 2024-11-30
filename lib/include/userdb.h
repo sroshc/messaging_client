@@ -1,12 +1,12 @@
 #ifndef USERDB_H
 #define USERDB_H
 
-#define USER_VALID 1
-#define USER_INVALD 0
-#define USER_DOESNT_EXIST -1
-#define VALIDATION_ERROR -2
-#define SUCCESS 1
-#define FAIL 0
+#define DB_USER_VALID 1
+#define DB_USER_INVALD 0
+#define DB_USER_DOESNT_EXIST -1
+#define DB_VALIDATION_ERROR -2
+#define DB_SUCCESS 1
+#define DB_FAIL 0
 
 #define NO_ROW_AVAILABLE 101
 #define INVALID_MESSAGE 19
