@@ -19,14 +19,28 @@
 #define PORT 8080
 #define SOCKETERROR (-1)
 #define SERVER_BACKLOG 10
+#define MAX_CLIENTS 100
+
+int server_fd; // Global server file descriptor so signal function can shut it down
+pthread_t client_threads[MAX_CLIENTS]; // Holds all handle_connection() threads
+int client_fds[MAX_CLIENTS] = {-1};   // Holds all currently connected client sockets
+pthread_mutex_t connections_mutex = PTHREAD_MUTEX_INITIALIZER; 
+
+
+#define SERVER_ONLINE 1
+#define SERVER_OFFLINE 0
+int SERVER_STATUS = SERVER_ONLINE;
 
 const char* DATABASE_NAME = "db";
+
+
 
 typedef struct{
     int client_fd;
     SSL_CTX* ctx;
     socklen_t client_socklen;
     struct sockaddr_in client_sockaddr;
+    int thread_index;
 } t_client_args;
 
 void init_db(){
@@ -85,7 +99,7 @@ int check(int event, const char* msg){
 }
 
 void handle_errors(int err){
-    if (err == SSL_ERROR_ZERO_RETURN) {
+    if (err == SSL_ERROR_NONE) {
         printf("Client disconnected gracefully\n");
     } else if (err == SSL_ERROR_SYSCALL) {
         if (errno == EPIPE) {
@@ -96,10 +110,7 @@ void handle_errors(int err){
     } else {
         fprintf(stderr, "SSL error: %d\n", err);
     }
-
-    if(err == 1){
-        printf("(likely not an error)\n");
-    }
+    ERR_print_errors_fp(stderr);
 }
 
 void *handle_connection(void *args_input){
@@ -118,35 +129,76 @@ void *handle_connection(void *args_input){
     }
     
     char receive_buffer[4096];
-    int bytes_read;
+    int bytes_read = 0;
     int command;
 
-    while((bytes_read = SSL_read(ssl, receive_buffer, sizeof(receive_buffer) - 1)) > 0){   
+    while(SERVER_STATUS == SERVER_ONLINE && (bytes_read = SSL_read(ssl, receive_buffer, sizeof(receive_buffer) - 1)) > 0){   
         receive_buffer[bytes_read] = '\0';
+        if(bytes_read <= 0){
+            int err = SSL_get_error(ssl, bytes_read);
+            handle_errors(err);
+            break;
+        }
         printf("Read from client %s: %s\n", client_ip, receive_buffer);
     }
 
 
     cleanup:
+        pthread_mutex_lock(&connections_mutex);
+        client_fds[client->thread_index] = -1;
+        if(SSL_shutdown(ssl) == 0){
+            SSL_shutdown(ssl);
+        }     
         close(client->client_fd);
-        SSL_shutdown(ssl);
         SSL_free(ssl);
         free(client);
 
         int err_code = SSL_get_error(ssl, bytes_read);
         handle_errors(err_code);
+        pthread_mutex_unlock(&connections_mutex);
 
         printf("Closed connection with %s\n", client_ip);
         return NULL;
 }
 
+
+// TODO: Inform client that server is full there are the max amount of connection threads
+void handle_client_limit(int client_fd, SSL_CTX* ctx){
+    write(client_fd, "Full!", 6);
+
+    // SSL *ssl = SSL_new(client->ctx);
+    // SSL_set_fd(ssl, client_fd);
+
+    // if (SSL_accept(ssl) <= 0) {
+    //     unsigned long err_code = ERR_get_error();
+    //     fprintf(stderr, "SSL handshake failed with %s: %s\n", client_ip, ERR_error_string(err_code, NULL));
+    //     goto cleanup;
+    // } else{
+    //     printf("SSL handshake completed with %s\n", client_ip);
+    // }
+
+}
+
 void handle_SIGPIPE(int err){
+    fprintf(stderr, "Received SIGPIPE. The connection was likely closed.\n");    
     return;
 }
 
+
+void quit_handler(int err){
+    printf("Shutting down server...\n");
+    close(server_fd);
+    SERVER_STATUS = SERVER_OFFLINE;
+    
+}
+
+
+
 int main() {
     signal(SIGPIPE, handle_SIGPIPE); // investigate deeper into this one day lol
-    int server_fd, client_fd;
+    signal(SIGINT, quit_handler);
+
+    int client_fd;
     struct sockaddr_in addr;
     SSL_CTX *ctx;
 
@@ -165,41 +217,66 @@ int main() {
     addr.sin_addr.s_addr = INADDR_ANY;
     addr.sin_port = htons(PORT);
 
-    check(bind(server_fd, (struct sockaddr *)&addr, sizeof(addr)), "Bind failed.");
-    check(listen(server_fd, 1), "Listen failed.");
+    check(bind(server_fd, (struct sockaddr *)&addr, sizeof(addr)), "Bind failed");
+    check(listen(server_fd, SERVER_BACKLOG), "Listen failed");
 
     printf("Listening on port %d...\n", PORT);
 
 
     struct sockaddr_in client_addr;
     socklen_t socklen = sizeof(client_addr);
+    int thread_index;
 
-    while(1){
-        check(client_fd = accept(server_fd, (struct sockaddr *) &client_addr, &socklen), "Accept failed.");
+    while(SERVER_STATUS == SERVER_ONLINE){
+        check(client_fd = accept(server_fd, (struct sockaddr *) &client_addr, &socklen), "Accept failed ");
         
+        thread_index = -1;
+        for(int i = 0; i < MAX_CLIENTS; i++){
+            if(client_fds[i] == -1){
+                thread_index = i;
+                pthread_mutex_lock(&connections_mutex);
+                client_fds[i] = client_fd;
+                pthread_mutex_unlock(&connections_mutex);
+                break;
+            }
+        }
+        
+
+        if(thread_index == -1){ //TODO: Actually write data to client telling it that server is full
+            close(client_fd);
+            continue;
+        }
+
         char client_ip[INET_ADDRSTRLEN];
         inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, INET_ADDRSTRLEN);
 
         printf("Connection from %s\n", client_ip);
         
-        pthread_t  t;
+        pthread_t t;
         
         t_client_args* args = malloc(sizeof(t_client_args));
 
         if(args == NULL){
             perror("Failed allocating memory for arguments.");
+            client_fds[thread_index] = -1; 
             close(client_fd);
             continue;
-        }        
+        }
         
         args->client_fd = client_fd;
         args->ctx = ctx;
         args->client_socklen = socklen;
         args->client_sockaddr = client_addr;
+        args->thread_index = thread_index;
+
 
         pthread_create(&t, NULL, handle_connection, args);
-        pthread_detach(t);
 
+        pthread_mutex_lock(&connections_mutex);
+        client_threads[thread_index] = t;
+        pthread_mutex_unlock(&connections_mutex);
+
+        pthread_detach(t);
     }
 
     SSL_CTX_free(ctx);
