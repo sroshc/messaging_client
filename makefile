@@ -1,6 +1,6 @@
 CC = cc
 CFLAGS = -Wall -g
-OBJ = server.o hash.o parser.o userdb.o
+OBJ = server.o hash.o parser.o userdb.o encode.o
 TARGET = server
 
 all: $(TARGET)
@@ -19,6 +19,9 @@ hash.o: lib/src/hash.c lib/include/hash.h
 
 parser.o: lib/src/parser.c lib/include/parser.h
 	$(CC) $(CFLAGS) -c lib/src/parser.c
+
+encode.o: lib/src/encode.c lib/include/encode.h
+	$(CC) $(CFLAGS) -c lib/src/encode.c
 
 clean:
 	rm -f $(OBJ) $(TARGET)
