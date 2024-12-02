@@ -12,10 +12,13 @@ Format for client:
 Commands currently available:
     LOGIN:
         Expects "username" and "password"
+        Returns field "session_key" and success or fail
     MAKE_ACCOUNT:
         Expects "username" and "password"
+        Returns 32 char length "session_key" and success or fail
     SEND_MESSAGE:  
         Expects "recipient_id" and "content"
+        Returns success or fail
 
     
 
