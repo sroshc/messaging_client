@@ -2,11 +2,12 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include <pthread.h>
+#include <openssl/rand.h>
+#include "../include/encode.h"
 #include "../include/hash.h"
 
 Session *session= NULL;
 pthread_mutex_t lock;
-
 
 void init_session_keys(){
     if(pthread_mutex_init(&lock, NULL) != 0){
@@ -62,6 +63,18 @@ void delete_session(int id){
     }
 
     return;
+}
+
+char* get_new_session_key(int len){
+    int rand_len = (len/4 * 3); 
+
+    unsigned char u_res[rand_len];
+    RAND_bytes(u_res, rand_len);
+
+    size_t output_length;
+    char* res = base64_encode((const unsigned char*) u_res, rand_len, &output_length);
+    
+    return res;
 }
 
 void test_hash_table(){

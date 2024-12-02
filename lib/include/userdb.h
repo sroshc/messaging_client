@@ -15,15 +15,6 @@
 #define HASHLENGTH 32
 #define SALT_BASE64_LENGTH 25
 
-
-char *base64_encode(const unsigned char *data, size_t input_length, size_t *output_length);
-
-void build_decoding_table();
-
-unsigned char *base64_decode(const char *data, size_t input_length, size_t *output_length);
-
-void base64_cleanup();
-
 sqlite3 *create_database(char* name);
 
 int add_user(sqlite3 *db, char *username, char *password);

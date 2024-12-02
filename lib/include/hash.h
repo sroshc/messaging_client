@@ -11,6 +11,8 @@ typedef struct Session{
     UT_hash_handle hh;
 }Session;
 
+char* get_new_session_key(int len);
+
 void init_session_keys();
 
 void free_session_keys();
