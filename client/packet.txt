@@ -1,7 +1,7 @@
 {
     "command": "MAKE_ACCOUNT",
     "arguments": {
-        "username": "sroshc2",
+        "username": "sroshc3",
         "password": "mysupersecretpassword"
     }
 }

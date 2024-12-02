@@ -5,12 +5,15 @@
 #include <string.h>
 #include <signal.h>
 #include <pthread.h>
+#include <stdbool.h>
 #include <arpa/inet.h>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 
 #define SERVER_ADDR "127.0.0.1"
 #define PORT 8080
+
+bool is_server_online = true;
 
 void init_openssl() {
     SSL_load_error_strings();
@@ -59,8 +62,14 @@ void* handle_server_responses(void* ssl){
     }
 }
 
+void quit_handler(int err){
+    is_server_online = false;
+}
+
 int main() {
     signal(SIGPIPE, handle_SIGPIPE); // investigate deeper into this one day lol
+    signal(SIGINT, quit_handler);
+
 
     int sock;
     struct sockaddr_in server_addr;
@@ -109,7 +118,7 @@ int main() {
     char write_buffer[4096];
     char filename[256];
 
-    while(1) {
+    while(is_server_online) {
         printf("File to write: ");
         fflush(stdout);
         scanf("%s", filename);  
@@ -126,7 +135,7 @@ int main() {
             if (write_result <= 0) {
                 int err = SSL_get_error(ssl, write_result);
                 fprintf(stderr, "SSL write error: %d\n", err);
-                goto disconnect;
+                goto cleanup;
             }
             printf("Wrote: %.*s\n", (int)read_size, write_buffer);
         }
@@ -134,14 +143,12 @@ int main() {
         fclose(file);
     }
 
-    disconnect:
-    
 
-    if(SSL_shutdown(ssl) == 0){
-        SSL_shutdown(ssl);
-    }
 
     cleanup:
+        if(SSL_shutdown(ssl) == 0){
+            SSL_shutdown(ssl);
+        }
         close(sock);
         SSL_free(ssl);
         SSL_CTX_free(ctx);
