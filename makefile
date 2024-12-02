@@ -6,7 +6,7 @@ TARGET = server
 all: $(TARGET)
 
 $(TARGET): $(OBJ)
-	$(CC) $(CFLAGS) -o $(TARGET) $(OBJ) -l sqlite3 -l json-c -l ssl -l crypto 
+	$(CC) $(CFLAGS) -o $(TARGET) $(OBJ) -l sqlite3 -l json-c -l ssl -l crypto -g
 
 server.o: server.c 
 	$(CC) $(CFLAGS) -c server.c
