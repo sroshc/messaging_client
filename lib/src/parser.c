@@ -40,7 +40,6 @@ int get_command(char* json_string, json_object** object){
     int command_int = get_command_int(json_object_get_string(json_command));
 
 
-    json_object_put(json_command);
     return command_int == -1 ? INVALID : command_int;
 }
 

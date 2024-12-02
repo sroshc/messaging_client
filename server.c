@@ -105,18 +105,25 @@ int check(int event, const char* msg){
 }
 
 void handle_errors(int err){
-    if (err == SSL_ERROR_NONE) {
-        printf("Client disconnected gracefully\n");
-    } else if (err == SSL_ERROR_SYSCALL) {
-        if (errno == EPIPE) {
-            printf("Client disconnected with errors\n");
-        } else {
-            fprintf(stderr, "SSL error: %s\n", strerror(errno));
-        }
-    } else {
-        fprintf(stderr, "SSL error: %d\n", err);
+    switch(err) {
+        case SSL_ERROR_NONE:
+            printf("Client disconnected gracefully\n");
+            break;
+        case SSL_ERROR_SYSCALL:
+            if (errno == EPIPE) {
+                printf("Client disconnected with EPIPE (uh oh)\n");
+            } else {
+                fprintf(stderr, "SSL syscall error: %s\n", strerror(errno));
+            }
+            break;
+        case SSL_ERROR_ZERO_RETURN:
+            printf("SSL connection closed by client\n");
+            break;
+        default:
+            fprintf(stderr, "SSL error: %d\n", err);
+            ERR_print_errors_fp(stderr);
+            break;
     }
-    ERR_print_errors_fp(stderr);
 }
 
 int j_add_user(sqlite3* db, json_object* jobject){
@@ -139,7 +146,7 @@ int j_add_user(sqlite3* db, json_object* jobject){
         goto cleanup;
     }
 
-    username = json_object_get_string(j_username);
+    username = (char*) json_object_get_string(j_username);
     if(username == NULL){
         goto cleanup;
     }
@@ -154,7 +161,7 @@ int j_add_user(sqlite3* db, json_object* jobject){
         goto cleanup;
     }
 
-    password = json_object_get_string(j_password);
+    password = (char*) json_object_get_string(j_password);
     if(password == NULL){
         goto cleanup;
     }
@@ -169,14 +176,14 @@ int j_add_user(sqlite3* db, json_object* jobject){
     }
 
     cleanup:
-        if(arguments) json_object_put(arguments);
-        if(j_username) json_object_put(j_username);
-        if(j_password) json_object_put(j_password);
         return res;
 }
 
 void *handle_connection(void *args_input){
-    t_client_args* client = (t_client_args *) args_input;
+    t_client_args* client = NULL;
+    client = malloc(sizeof(t_client_args));
+    memcpy(client, args_input, sizeof(t_client_args));
+    free(args_input);
     SSL *ssl = SSL_new(client->ctx);
     SSL_set_fd(ssl, client->client_fd);
     char client_ip[INET_ADDRSTRLEN];
@@ -215,8 +222,7 @@ void *handle_connection(void *args_input){
         }
         
         command = get_command(receive_buffer, &jobject);
-        
-        
+                
 
         switch(command){
             case MAKE_ACCOUNT:
@@ -232,27 +238,41 @@ void *handle_connection(void *args_input){
         
         printf("Read from client %s: %s\n", client_ip, receive_buffer);
         print_all(db, "USERS");
+        if(jobject) json_object_put(jobject);
+        jobject = NULL;
     }
 
 
     cleanup:
         if(db) sqlite3_close(db);
-        json_object_put(jobject);
+        if(jobject) json_object_put(jobject);
+        jobject = NULL;
 
         pthread_mutex_lock(&connections_mutex);
         client_fds[client->thread_index] = -1;
-        if(SSL_shutdown(ssl) == 0){
-            SSL_shutdown(ssl);
-        }     
-        close(client->client_fd);
-        SSL_free(ssl);
-        free(client);
-
-        int err_code = SSL_get_error(ssl, bytes_read);
-        handle_errors(err_code);
         pthread_mutex_unlock(&connections_mutex);
 
+        if (ssl) {
+            int shutdown_result = SSL_shutdown(ssl);
+            if (shutdown_result == 0) {
+                SSL_shutdown(ssl);
+            }
+            
+            int err_code = SSL_get_error(ssl, bytes_read);
+            if (err_code != SSL_ERROR_NONE) {
+                handle_errors(err_code);
+            }
+            
+            SSL_free(ssl);
+        }
+
+        close(client->client_fd);
+        
         printf("Closed connection with %s\n", client_ip);
+
+        if(client) free(client); 
+        client = NULL;
+                
         return NULL;
 }
 
@@ -297,8 +317,11 @@ void quit_handler(int err){
 
     printf("Stopped listening for new connections.\n");
 
+    pthread_mutex_lock(&connections_mutex);
     SERVER_STATUS = SERVER_OFFLINE;
+    pthread_mutex_unlock(&connections_mutex);
     
+    return;
 }
 
 
@@ -338,24 +361,21 @@ int main() {
 
     while(SERVER_STATUS == SERVER_ONLINE){
         int accept_result = client_fd = accept(server_fd, (struct sockaddr *) &client_addr, &socklen);
-        
         if(accept_result == SOCKETERROR){
             printf("Breaking out of listening loop\n");
             break;
         }
 
-
+        pthread_mutex_lock(&connections_mutex);
         thread_index = -1;
         for(int i = 0; i < MAX_CLIENTS; i++){
             if(client_fds[i] == -1){
                 thread_index = i;
-                pthread_mutex_lock(&connections_mutex);
                 client_fds[i] = client_fd;
-                pthread_mutex_unlock(&connections_mutex);
                 break;
             }
         }
-        
+        pthread_mutex_unlock(&connections_mutex);
 
         if(thread_index == -1){ //TODO: Actually write data to client telling it that server is full
             close(client_fd);
@@ -368,7 +388,6 @@ int main() {
         printf("Connection from %s\n", client_ip);
         
         pthread_t t;
-        
         t_client_args* args = malloc(sizeof(t_client_args));
 
         if(args == NULL){
@@ -377,6 +396,7 @@ int main() {
             close(client_fd);
             continue;
         }
+
         
         args->client_fd = client_fd;
         args->ctx = ctx;
@@ -384,13 +404,11 @@ int main() {
         args->client_sockaddr = client_addr;
         args->thread_index = thread_index;
 
-
-        pthread_create(&t, NULL, handle_connection, args);
-
         pthread_mutex_lock(&connections_mutex);
         client_threads[thread_index] = t;
         pthread_mutex_unlock(&connections_mutex);
 
+        pthread_create(&t, NULL, handle_connection, args);
         pthread_detach(t);
     }
 
