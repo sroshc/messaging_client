@@ -135,6 +135,7 @@ int main() {
             if (write_result <= 0) {
                 int err = SSL_get_error(ssl, write_result);
                 fprintf(stderr, "SSL write error: %d\n", err);
+                fclose(file);
                 goto cleanup;
             }
             printf("Wrote: %.*s\n", (int)read_size, write_buffer);
