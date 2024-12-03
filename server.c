@@ -48,6 +48,12 @@ typedef struct{
     int thread_index;
 } t_client_args;
 
+typedef struct{
+    int client_fd;
+    SSL_CTX* ctx;
+
+} full_client_args;
+
 void init_db(){
     create_database(DATABASE_NAME);
 }
@@ -124,12 +130,16 @@ void handle_errors(int err){
             ERR_print_errors_fp(stderr);
             break;
     }
+    
+    return;
 }
 
-int j_add_user(sqlite3* db, json_object* jobject){
+int j_add_user(sqlite3* db, json_object* jobject, char** username_output){
     int res = BAD_REQUEST;
     json_object* arguments = NULL;
-    
+    *username_output = NULL;
+
+
     json_object_object_get_ex(jobject, ARGUMENTS, &arguments);
 
     if(arguments == NULL){
@@ -150,6 +160,9 @@ int j_add_user(sqlite3* db, json_object* jobject){
     if(username == NULL){
         goto cleanup;
     }
+    *username_output = malloc(strlen(username));
+    strncpy(*username_output, username, strlen(username)); 
+    
     
 
     /* Grab password from json */
@@ -179,6 +192,31 @@ int j_add_user(sqlite3* db, json_object* jobject){
         return res;
 }
 
+/* Handling Server Responses */
+int res_send_key(SSL* ssl, char* username){ //Todo: actually add the session key
+    json_object *jobj;
+
+    jobj = json_object_new_object();
+    json_object_object_add(jobj, "response_code", json_object_new_int64(SUCCESS));
+
+    char s_key[SESSION_KEY_LENGTH];
+    
+    strncpy(s_key, get_new_session_key(SESSION_KEY_LENGTH), (size_t)SESSION_KEY_LENGTH);
+    
+    json_object_object_add(jobj, SESSION_TOKEN, json_object_new_string(s_key));
+
+    const char* j_final_response = json_object_get_string(jobj);
+
+    SSL_write(ssl, j_final_response, strlen(j_final_response));
+
+    free(jobj);
+
+    return 1;
+}
+
+
+
+/* Handling a connection with a client, in a new thread */
 void *handle_connection(void *args_input){
     t_client_args* client = NULL;
     client = malloc(sizeof(t_client_args));
@@ -224,10 +262,13 @@ void *handle_connection(void *args_input){
         command = get_command(receive_buffer, &jobject);
                 
 
+        char* username = NULL;
+
         switch(command){
             case MAKE_ACCOUNT:
-                if(j_add_user(db, jobject) == SUCCESS){
-                    SSL_write(ssl, S_SERVER_SUCCESS, strlen(S_SERVER_SUCCESS));
+                if(j_add_user(db, jobject, &username) == SUCCESS){
+                    res_send_key(ssl, username);
+                    free(username);
                 }else{
                     SSL_write(ssl, S_BAD_REQUEST, strlen(S_BAD_REQUEST));
                 }
@@ -343,6 +384,11 @@ int main() {
     if (server_fd < 0) {
         perror("Socket creation failed");
         exit(1);
+    }
+
+    int optval = 1;
+    if(setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval)) < 0){
+        perror("Setting socket options for SO_REUSEADDR failed. Continuing.");
     }
 
     addr.sin_family = AF_INET;
