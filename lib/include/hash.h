@@ -7,7 +7,7 @@
 
 typedef struct Session{
     int user_id;
-    char key[SESSION_KEY_LENGTH];
+    char key[256];
     UT_hash_handle hh;
 }Session;
 
@@ -19,8 +19,10 @@ void free_session_keys();
 
 void add_session(int user_id, char* key);
 
-bool is_key_valid(int id, const char* key);
+bool is_key_valid(const char* key);
 
-void delete_session(int id);
+void delete_session(const char* key);
+
+void print_all_keys();
 
 #endif

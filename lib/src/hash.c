@@ -37,36 +37,35 @@ void free_session_keys(){
 
 void add_session(int user_id, char* key){
     Session *s = malloc(sizeof(Session));
+    if (!s) {
+        fprintf(stderr, "Memory allocation failed\n");
+        return;
+    }
     s->user_id = user_id;
-    strncpy(s->key, key, SESSION_KEY_LENGTH);
-    HASH_ADD_INT(session, user_id, s);
+    strncpy(s->key, key, SESSION_KEY_LENGTH); 
+    HASH_ADD_STR(session, key, s);           
     return;
 }
 
-bool is_key_valid(int id, const char* key){
-    Session* s;
-    HASH_FIND_INT(session, &id, s);
-    if(!s){
-        return NULL;
-    }
 
-    return strcmp(s->key, key) == 0;
+bool is_key_valid(const char* key) {
+    Session* s;
+    HASH_FIND_STR(session, key, s);
+    return s != NULL;
 }
 
-void delete_session(int id){
+void delete_session(const char* key) {
     Session* s;
-    HASH_FIND_INT(session, &id, s);
-
-    if(s){
+    HASH_FIND_STR(session, key, s);
+    if (s) {
         HASH_DEL(session, s);
         free(s);
     }
-
-    return;
 }
 
+
 char* get_new_session_key(int len){
-    int rand_len = (len/4 * 3); 
+    int rand_len = (len * 3 ) / 4; 
 
     unsigned char u_res[rand_len];
     RAND_bytes(u_res, rand_len);
@@ -74,7 +73,26 @@ char* get_new_session_key(int len){
     size_t output_length;
     char* res = base64_encode((const unsigned char*) u_res, rand_len, &output_length);
     
+    if(output_length != len){
+        printf("Function get_new_session_key() doesn't return the correct length\n");
+    }
+
     return res;
+}
+
+void print_all_keys(){
+    if(!session){
+        return;
+    }
+
+    Session *curr_session, *tmp;
+
+    HASH_ITER(hh, session, curr_session, tmp) {
+        printf("ID: %d, KEY: %s\n", curr_session->user_id, curr_session->key);
+    }
+
+
+    return;
 }
 
 void test_hash_table(){
@@ -83,7 +101,7 @@ void test_hash_table(){
     add_session(1, "hello");
     add_session(2, "hi");
 
-    if(is_key_valid(1, "hello") && !is_key_valid(1, "dsajd") && is_key_valid(2, "hi") && !is_key_valid(3, "hi")){
+    if(is_key_valid("hello") && !is_key_valid("dsajd") && is_key_valid("hi") && !is_key_valid("hsi")){
         printf("Works!\n");
     }else{
         printf("Doesn't work.\n");
