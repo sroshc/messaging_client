@@ -23,6 +23,7 @@
 #define SERVER_BACKLOG 10
 #define MAX_CLIENTS 100
 
+char *S_SERVER_FULL = "{\"response_code\": 501}";
 char *S_SERVER_FAILURE = "{\"response_code\": 500}";
 char *S_SERVER_SUCCESS = "{\"response_code\": 200}";
 char *S_BAD_REQUEST = "{\"response_code\": 400}";
@@ -324,21 +325,38 @@ void *handle_connection(void *args_input){
 }
 
 
-// TODO: Inform client that server is full there are the max amount of connection threads
+//TODO: make this multithreaded if you feel like it
 void handle_client_limit(int client_fd, SSL_CTX* ctx){
-    write(client_fd, "Full!", 6);
+    SSL *ssl = NULL;
+    ssl = SSL_new(ctx);
+    SSL_set_fd(ssl, client_fd);
 
-    // SSL *ssl = SSL_new(client->ctx);
-    // SSL_set_fd(ssl, client_fd);
+    if (SSL_accept(ssl) <= 0) {
+        unsigned long err_code = ERR_get_error();
+        fprintf(stderr, "SSL handshake failed with %s: %s (server full)\n", client_ip, ERR_error_string(err_code, NULL));
+        if(ssl)SSL_shutdown(ssl);
+        return;
+    } else{
+        printf("SSL handshake completed with %s (server full)\n", client_ip);
+    }
 
-    // if (SSL_accept(ssl) <= 0) {
-    //     unsigned long err_code = ERR_get_error();
-    //     fprintf(stderr, "SSL handshake failed with %s: %s\n", client_ip, ERR_error_string(err_code, NULL));
-    //     goto cleanup;
-    // } else{
-    //     printf("SSL handshake completed with %s\n", client_ip);
-    // }
+    SSL_write(ssl, S_SERVER_FULL, strlen(S_SERVER_FULL));
+    if (ssl) {
+        int shutdown_result = SSL_shutdown(ssl);
+        if (shutdown_result == 0) {
+            SSL_shutdown(ssl);
+        }
+       
+        int err_code = SSL_get_error(ssl, bytes_read);
+        if (err_code != SSL_ERROR_NONE) {
+            handle_errors(err_code);
+        }
+        
+        SSL_free(ssl);
+    }    
+    close(client_fd;)
 
+    return;
 }
 
 void handle_SIGPIPE(int err){
@@ -430,7 +448,7 @@ int main() {
         pthread_mutex_unlock(&connections_mutex);
 
         if(thread_index == -1){ //TODO: Actually write data to client telling it that server is full
-            close(client_fd);
+            handle_client_limit(client_fd, ctx);
             continue;
         }
 
