@@ -23,6 +23,8 @@ int is_user_valid(sqlite3* db, char* username, char* password);
 
 bool does_user_exist(sqlite3 *db, char* username);
 
+int get_user_id(sqlite3* db, char* username);
+
 int add_message(sqlite3 *db, int sender_id, int receiver_id, char *text);
 
 int print_all(sqlite3 *db, char* table);
