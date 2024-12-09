@@ -193,20 +193,23 @@ int j_add_user(sqlite3* db, json_object* jobject, char** username_output){
 }
 
 /* Handling Server Responses */
-int res_send_key(SSL* ssl, char* username){ //Todo: actually add the session key
+int res_send_key(SSL* ssl, int user_id){ //Todo: actually add the session key
     json_object *jobj;
 
     jobj = json_object_new_object();
     json_object_object_add(jobj, "response_code", json_object_new_int64(SUCCESS));
 
-    char s_key[SESSION_KEY_LENGTH];
-    
-    strncpy(s_key, get_new_session_key(SESSION_KEY_LENGTH), (size_t)SESSION_KEY_LENGTH);
-    
+    char s_key[SESSION_KEY_LENGTH + 1];
+    s_key[SESSION_KEY_LENGTH] = '\0';
+    strncpy(s_key, get_new_session_key(SESSION_KEY_LENGTH), SESSION_KEY_LENGTH);
+
+    printf("%s\n", s_key);
+
     json_object_object_add(jobj, SESSION_TOKEN, json_object_new_string(s_key));
 
     const char* j_final_response = json_object_get_string(jobj);
 
+    add_session(user_id, s_key);
     SSL_write(ssl, j_final_response, strlen(j_final_response));
 
     free(jobj);
@@ -267,7 +270,7 @@ void *handle_connection(void *args_input){
         switch(command){
             case MAKE_ACCOUNT:
                 if(j_add_user(db, jobject, &username) == SUCCESS){
-                    res_send_key(ssl, username);
+                    res_send_key(ssl, get_user_id(db, username));
                     free(username);
                 }else{
                     SSL_write(ssl, S_BAD_REQUEST, strlen(S_BAD_REQUEST));
@@ -278,7 +281,10 @@ void *handle_connection(void *args_input){
         }
         
         printf("Read from client %s: %s\n", client_ip, receive_buffer);
+        printf("Current USERS table:\n");
         print_all(db, "USERS");
+        printf("Current session keys:\n");
+        print_all_keys();
         if(jobject) json_object_put(jobject);
         jobject = NULL;
     }
