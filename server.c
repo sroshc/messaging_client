@@ -25,8 +25,9 @@
 
 char *S_SERVER_FULL = "{\"response_code\": 501}";
 char *S_SERVER_FAILURE = "{\"response_code\": 500}";
-char *S_SERVER_SUCCESS = "{\"response_code\": 200}";
+char *S_NOT_AUTHORIZED = "{\"response_code\": 401}";
 char *S_BAD_REQUEST = "{\"response_code\": 400}";
+char *S_SERVER_SUCCESS = "{\"response_code\": 200}";
 
 
 int server_fd; // Global server file descriptor so signal function can shut it down
@@ -161,9 +162,6 @@ int j_add_user(sqlite3* db, json_object* jobject, char** username_output){
     if(username == NULL){
         goto cleanup;
     }
-    *username_output = malloc(strlen(username));
-    strncpy(*username_output, username, strlen(username)); 
-    
     
 
     /* Grab password from json */
@@ -180,8 +178,6 @@ int j_add_user(sqlite3* db, json_object* jobject, char** username_output){
         goto cleanup;
     }
 
-
-
     int rc;
     rc = add_user(db, username, password);
 
@@ -190,7 +186,60 @@ int j_add_user(sqlite3* db, json_object* jobject, char** username_output){
     }
 
     cleanup:
+        if(res == SUCCESS){
+            *username_output = malloc(strlen(username));
+            strncpy(*username_output, username, strlen(username)); 
+        }
         return res;
+}
+
+int j_login_user(sqlite3* db, json_object* jobject, char** username_output){ //TODO: Test this endpoint
+    int res = BAD_REQUEST;
+    json_object* arguments = NULL;
+    json_object_object_get_ex(jobject, ARGUMENTS, &arguments);
+
+    if(arguments == NULL){
+        goto cleanup;
+    }
+
+
+    /* Grab username from arguments */
+    json_object* j_username = NULL;
+    char* username = NULL;
+
+    json_object_object_get_ex(arguments, USERNAME, &j_username);
+    if(j_username == NULL){
+        goto cleanup;
+    }
+    username = (char*) json_object_get_string(j_username);
+    if(username == NULL){
+        goto cleanup;
+    }
+
+
+    /* Grab paassword from arguments */
+    json_object* j_password = NULL; 
+    char* password = NULL;
+
+    json_object_object_get_ex(arguments, PASSWORD, &j_password);
+    if(j_password == NULL){
+        goto cleanup;
+    }
+    password = (char*) json_object_get_string(j_password);
+    if(password == NULL){
+        goto cleanup;
+    }
+
+    printf("%s trid logging in with: %s\n", username, password);
+    res = is_user_valid(db, username, password) == DB_USER_VALID? SUCCESS: NOT_AUTHORIZED;
+
+    cleanup:
+        if(res == SUCCESS){
+            *username_output = malloc(strlen(username));
+            strncpy(*username_output, username, strlen(username)); 
+        }
+        return res;
+
 }
 
 /* Handling Server Responses */
@@ -254,6 +303,7 @@ void *handle_connection(void *args_input){
     json_object * jobject = NULL;
     int bytes_read = 0;
     int command;
+    char* username = NULL;
 
     while(SERVER_STATUS == SERVER_ONLINE && (bytes_read = SSL_read(ssl, receive_buffer, sizeof(receive_buffer) - 1)) > 0){   //TODO: fix
         receive_buffer[bytes_read] = '\0';
@@ -265,15 +315,27 @@ void *handle_connection(void *args_input){
         
         command = get_command(receive_buffer, &jobject);
                 
-
-        char* username = NULL;
-
         switch(command){
             case MAKE_ACCOUNT:
                 if(j_add_user(db, jobject, &username) == SUCCESS){
                     res_send_key(ssl, get_user_id(db, username));
                     free(username);
+                    username = NULL;
                 }else{
+                    SSL_write(ssl, S_BAD_REQUEST, strlen(S_BAD_REQUEST));
+                }
+                break;
+            case LOGIN:
+                printf("Tried to log in\n");
+                int res = j_login_user(db, jobject, &username);
+                if(res == SUCCESS){
+                    res_send_key(ssl, get_user_id(db, username));
+                    free(username);
+                    username = NULL;
+                }else if(res == NOT_AUTHORIZED){
+                      SSL_write(ssl, S_NOT_AUTHORIZED, strlen(S_NOT_AUTHORIZED));
+                }
+                else{
                     SSL_write(ssl, S_BAD_REQUEST, strlen(S_BAD_REQUEST));
                 }
                 break;
@@ -295,6 +357,8 @@ void *handle_connection(void *args_input){
         if(db) sqlite3_close(db);
         if(jobject) json_object_put(jobject);
         jobject = NULL;
+        if(username) free(username);
+        username = NULL;
 
         pthread_mutex_lock(&connections_mutex);
         client_fds[client->thread_index] = -1;
@@ -333,28 +397,23 @@ void handle_client_limit(int client_fd, SSL_CTX* ctx){
 
     if (SSL_accept(ssl) <= 0) {
         unsigned long err_code = ERR_get_error();
-        fprintf(stderr, "SSL handshake failed with %s: %s (server full)\n", client_ip, ERR_error_string(err_code, NULL));
+        fprintf(stderr, "SSL handshake failed: %s (server full)\n", ERR_error_string(err_code, NULL));
         if(ssl)SSL_shutdown(ssl);
         return;
     } else{
-        printf("SSL handshake completed with %s (server full)\n", client_ip);
+        printf("SSL handshake completed (server full)\n");
     }
 
     SSL_write(ssl, S_SERVER_FULL, strlen(S_SERVER_FULL));
+
     if (ssl) {
         int shutdown_result = SSL_shutdown(ssl);
         if (shutdown_result == 0) {
             SSL_shutdown(ssl);
         }
-       
-        int err_code = SSL_get_error(ssl, bytes_read);
-        if (err_code != SSL_ERROR_NONE) {
-            handle_errors(err_code);
-        }
-        
         SSL_free(ssl);
     }    
-    close(client_fd;)
+    close(client_fd);
 
     return;
 }
