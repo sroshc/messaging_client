@@ -56,7 +56,7 @@ void* handle_server_responses(void* ssl){
         if(res <= 0){
             return NULL;
         }
-        receive_buffer[sizeof(receive_buffer) - 1] = '\0';
+        receive_buffer[res - 1] = '\0';
 
         printf("Server sent: %s\n", receive_buffer);
     }
