@@ -32,7 +32,7 @@ char *S_SERVER_SUCCESS = "{\"response_code\": 200}";
 
 int server_fd; // Global server file descriptor so signal function can shut it down
 pthread_t client_threads[MAX_CLIENTS]; // Holds all handle_connection() threads
-int client_fds[MAX_CLIENTS] = {-1};   // Holds all currently connected client sockets
+int client_fds[MAX_CLIENTS] = { [0 ... MAX_CLIENTS-1] = -1 };  // Holds all currently connected client sockets, this shortcut to set all values to -1 only be used with the GCC compiler
 pthread_mutex_t connections_mutex = PTHREAD_MUTEX_INITIALIZER; 
 
 
@@ -249,21 +249,19 @@ int res_send_key(SSL* ssl, int user_id){ //Todo: actually add the session key
     jobj = json_object_new_object();
     json_object_object_add(jobj, "response_code", json_object_new_int64(SUCCESS));
 
-    char s_key[SESSION_KEY_LENGTH + 1];
-    s_key[SESSION_KEY_LENGTH] = '\0';
-    strncpy(s_key, get_new_session_key(SESSION_KEY_LENGTH), SESSION_KEY_LENGTH);
+    char *s_key = get_new_session_key(SESSION_KEY_LENGTH);
 
     printf("%s\n", s_key);
 
     json_object_object_add(jobj, SESSION_TOKEN, json_object_new_string(s_key));
 
-    const char* j_final_response = json_object_get_string(jobj);
+    const char *final_response = json_object_to_json_string_ext(jobj, JSON_C_TO_STRING_NOSLASHESCAPE); // this flag should be default smh; or have a way to set it as default
 
     add_session(user_id, s_key);
-    SSL_write(ssl, j_final_response, strlen(j_final_response));
+    SSL_write(ssl, final_response, strlen(final_response));
 
     free(jobj);
-
+    free(s_key);
     return 1;
 }
 
@@ -506,7 +504,7 @@ int main() {
         }
         pthread_mutex_unlock(&connections_mutex);
 
-        if(thread_index == -1){ //TODO: Actually write data to client telling it that server is full
+        if(thread_index == -1){
             handle_client_limit(client_fd, ctx);
             continue;
         }
