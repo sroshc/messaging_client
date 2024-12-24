@@ -10,6 +10,7 @@ typedef struct json_object json_object;
 
 #define USERNAME "username"
 #define PASSWORD "password"
+#define RECIPIENT_ID "recipient_id"
 #define CONTENT "content"
 
 enum response{

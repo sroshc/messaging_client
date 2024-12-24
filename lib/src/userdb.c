@@ -9,19 +9,6 @@
 #include "../include/userdb.h"
 #include "../include/encode.h"
 
-#define USER_VALID 1
-#define USER_INVALD 0
-#define USER_DOESNT_EXIST -1
-#define VALIDATION_ERROR -2
-#define SUCCESS 1
-#define FAIL 0
-
-#define NO_ROW_AVAILABLE 101
-#define INVALID_MESSAGE 19
-
-#define SALTLENGTH 16
-#define HASHLENGTH 32
-#define SALT_BASE64_LENGTH 25
 
 pthread_mutex_t g_db_mutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -170,7 +157,7 @@ int add_user(sqlite3 *db, char *username, char *password){
         free(binary_hash);
         free(salt_and_pass);
         pthread_mutex_unlock(&g_db_mutex);
-        return FAIL;
+        return DB_FAIL;
     }
     sqlite3_bind_text(stmt, 1, username, -1, SQLITE_STATIC);
     sqlite3_bind_text(stmt, 2, salt, -1, SQLITE_STATIC);
@@ -182,7 +169,7 @@ int add_user(sqlite3 *db, char *username, char *password){
         fprintf(stderr, "SQL error while adding new user: %s\n", sqlite3_errmsg(db));
         sqlite3_finalize(stmt);
         pthread_mutex_unlock(&g_db_mutex);
-        return FAIL;
+        return DB_FAIL;
     }
     sqlite3_finalize(stmt);
 
@@ -194,13 +181,13 @@ int add_user(sqlite3 *db, char *username, char *password){
     free(salt_and_pass);
 
     pthread_mutex_unlock(&g_db_mutex);
-    return SUCCESS;
+    return DB_SUCCESS;
 }
 
 int is_user_valid(sqlite3* db, char* username, char* password) {
     sqlite3_stmt *stmtpass = NULL;
     sqlite3_stmt *stmtsalt = NULL;
-    int result = VALIDATION_ERROR;
+    int result = DB_VALIDATION_ERROR;
     char *input_salt_and_pass = NULL;
     unsigned char *input_hash = NULL;
     char *final_input_hash = NULL;
@@ -219,7 +206,7 @@ int is_user_valid(sqlite3* db, char* username, char* password) {
     int rcpass = sqlite3_step(stmtpass);
 
     if (rcpass == SQLITE_DONE) {  
-        result = USER_DOESNT_EXIST;
+        result = DB_USER_DOESNT_EXIST;
         goto cleanup;
     }
 
@@ -259,7 +246,7 @@ int is_user_valid(sqlite3* db, char* username, char* password) {
     final_input_hash = base64_encode(input_hash, input_hash_len, &final_input_hash_len);
     if (!final_input_hash) goto cleanup;
 
-    result = strcmp(final_input_hash, actual_pass) == 0 ? USER_VALID : USER_INVALD;
+    result = strcmp(final_input_hash, actual_pass) == 0 ? DB_USER_VALID : DB_USER_VALID;
 
 cleanup:
     if (stmtpass) sqlite3_finalize(stmtpass);
@@ -281,7 +268,7 @@ int get_messages(sqlite3* db, int user1_id, int user2_id, char*** messages, int*
     int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, 0);
     if (rc != SQLITE_OK) {
         fprintf(stderr, "Failed to prepare statement in get_messages: %s\n", sqlite3_errmsg(db));
-        return FAIL;
+        return DB_FAIL;
     }
 
     sqlite3_bind_int(stmt, 1, user1_id);
@@ -299,7 +286,7 @@ int get_messages(sqlite3* db, int user1_id, int user2_id, char*** messages, int*
         char* new_message = strdup(message);
         if (!new_message) {
             fprintf(stderr, "Memory allocation failed in get_messages\n");
-            rc = FAIL;
+            rc = DB_FAIL;
 
             goto cleanup;
         }
@@ -308,7 +295,7 @@ int get_messages(sqlite3* db, int user1_id, int user2_id, char*** messages, int*
         if (!resized) {
             fprintf(stderr, "Memory reallocation failed in get_messages\n");
             free(new_message);
-            rc = FAIL;
+            rc = DB_FAIL;
 
             goto cleanup;
         }
@@ -319,7 +306,7 @@ int get_messages(sqlite3* db, int user1_id, int user2_id, char*** messages, int*
 
     if (rc != SQLITE_DONE) {
         fprintf(stderr, "SQL error in get_messages: %s\n", sqlite3_errmsg(db));
-        rc = FAIL;
+        rc = DB_FAIL;
 
         goto cleanup;
     }
@@ -327,12 +314,12 @@ int get_messages(sqlite3* db, int user1_id, int user2_id, char*** messages, int*
     *messages = temp_messages;
     *message_count = count;
     sqlite3_finalize(stmt);
-    return SUCCESS;
+    return DB_SUCCESS;
 
-cleanup:
-    for (int i = 0; i < count; ++i) {
-        free(temp_messages[i]);
-    }
+    cleanup:
+        for (int i = 0; i < count; ++i) {
+            free(temp_messages[i]);
+        }
 
 
     free(temp_messages);
@@ -432,7 +419,7 @@ int add_message(sqlite3 *db, int sender_id, int receiver_id, char *text){
     if(rc != SQLITE_OK){
         fprintf(stderr, "Failed preparing SQL statement for add_message(): %s\n", sqlite3_errmsg(db));
         pthread_mutex_unlock(&g_db_mutex);
-        return FAIL;
+        return DB_FAIL;
     }
 
     sqlite3_bind_int(stmt, 1, sender_id);
@@ -444,19 +431,19 @@ int add_message(sqlite3 *db, int sender_id, int receiver_id, char *text){
     if(rc == INVALID_MESSAGE){
         sqlite3_finalize(stmt);
         pthread_mutex_unlock(&g_db_mutex);
-        return FAIL;
+        return DB_FAIL;
     }
 
     if(rc != SQLITE_OK && rc != NO_ROW_AVAILABLE){
         fprintf(stderr, "Failed sqlite3_step() in add_message(): %s\n", sqlite3_errmsg(db));
         sqlite3_finalize(stmt);
         pthread_mutex_unlock(&g_db_mutex);
-        return FAIL;
+        return DB_FAIL;
     }
 
     sqlite3_finalize(stmt);
     pthread_mutex_unlock(&g_db_mutex);
-    return SUCCESS;
+    return DB_SUCCESS;
 }
 
 
@@ -530,7 +517,7 @@ void* check_user_thread(void* user){
     for (int i = 0; i < 100; i++) {
         memset(curr_username, 0, sizeof(curr_username));
         sprintf(curr_username, "%s%d", userlocal->username, i);
-        if(is_user_valid(db, curr_username, userlocal->password) == USER_VALID){
+        if(is_user_valid(db, curr_username, userlocal->password) == DB_USER_VALID){
             printf("Valid: %s%d\n", userlocal->username,i);
         }else{
             printf("Invalid: %s%d\n", userlocal->username,i);
