@@ -17,7 +17,7 @@ Commands currently available:
         Expects "username" and "password"
         Returns 32 char length "session_key" and success or fail
     SEND_MESSAGE:  
-        Expects "recipient_id" and "content"
+        Expects "recipient_id" and "content", also needs a session_token
         Returns success or fail
 
     
