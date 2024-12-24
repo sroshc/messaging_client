@@ -48,10 +48,10 @@ void add_session(int user_id, char* key){
 }
 
 
-bool is_key_valid(const char* key) {
+int is_key_valid(const char* key) {
     Session* s;
     HASH_FIND_STR(session, key, s);
-    return s != NULL;
+    return s == NULL ? -1: s->user_id;
 }
 
 void delete_session(const char* key) {

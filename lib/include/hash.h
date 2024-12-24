@@ -19,7 +19,11 @@ void free_session_keys();
 
 void add_session(int user_id, char* key);
 
-bool is_key_valid(const char* key);
+
+/* Returns -1 if the key isn't valid, 
+    If it is, it will return the user id
+*/
+int is_key_valid(const char* key);
 
 void delete_session(const char* key);
 
