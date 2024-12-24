@@ -244,6 +244,7 @@ int j_login_user(sqlite3* db, json_object* jobject, char** username_output){
 }
 
 int j_send_message(sqlite3* db, json_object* jobject, char** username_output){
+    printf("Tried sending message\n");
     int res = BAD_REQUEST;
     
     /* Check if user is logged in properly */
@@ -268,6 +269,8 @@ int j_send_message(sqlite3* db, json_object* jobject, char** username_output){
         res = NOT_AUTHORIZED;
         goto cleanup;
     }
+
+    printf("Key %s with userid %d tried sending message\n", session_key, sender_id);
 
 
 
@@ -319,7 +322,7 @@ int j_send_message(sqlite3* db, json_object* jobject, char** username_output){
 
 
 /* Handling Server Responses */
-int res_send_key(SSL* ssl, int user_id){ //Todo: actually add the session key
+int res_send_key(SSL* ssl, int user_id){ 
     json_object *jobj;
 
     jobj = json_object_new_object();
@@ -379,7 +382,7 @@ void *handle_connection(void *args_input){
     int command;
     char* username = NULL;
 
-    while(SERVER_STATUS == SERVER_ONLINE && (bytes_read = SSL_read(ssl, receive_buffer, sizeof(receive_buffer) - 1)) > 0){   //TODO: fix
+    while(SERVER_STATUS == SERVER_ONLINE && (bytes_read = SSL_read(ssl, receive_buffer, sizeof(receive_buffer) - 1)) > 0){
         receive_buffer[bytes_read] = '\0';
         if(bytes_read <= 0){
             int err = SSL_get_error(ssl, bytes_read);
@@ -425,6 +428,7 @@ void *handle_connection(void *args_input){
                 }else{
                     SSL_write(ssl, S_SERVER_FAILURE, strlen(S_SERVER_FAILURE));
                 }
+                break;
 
 
             default:
