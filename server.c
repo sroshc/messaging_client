@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 #include <unistd.h>
 #include <arpa/inet.h>
@@ -187,13 +188,13 @@ int j_add_user(sqlite3* db, json_object* jobject, char** username_output){
 
     cleanup:
         if(res == SUCCESS){
-            *username_output = malloc(strlen(username));
+            *username_output = malloc(strlen(username) + 1);
             strncpy(*username_output, username, strlen(username)); 
         }
         return res;
 }
 
-int j_login_user(sqlite3* db, json_object* jobject, char** username_output){ //TODO: Test this endpoint
+int j_login_user(sqlite3* db, json_object* jobject, char** username_output){ 
     int res = BAD_REQUEST;
     json_object* arguments = NULL;
     json_object_object_get_ex(jobject, ARGUMENTS, &arguments);
@@ -235,12 +236,87 @@ int j_login_user(sqlite3* db, json_object* jobject, char** username_output){ //T
 
     cleanup:
         if(res == SUCCESS){
-            *username_output = malloc(strlen(username));
+            *username_output = malloc(strlen(username) +1);
             strncpy(*username_output, username, strlen(username)); 
         }
         return res;
 
 }
+
+int j_send_message(sqlite3* db, json_object* jobject, char** username_output){
+    int res = BAD_REQUEST;
+    
+    /* Check if user is logged in properly */
+    json_object* j_session_key = NULL;
+    const char* session_key = NULL;
+    
+    json_object_object_get_ex(jobject, SESSION_TOKEN, &j_session_key);
+
+    if(j_session_key == NULL){
+        goto cleanup;
+    }
+    
+    session_key = json_object_get_string(j_session_key);
+    if(session_key == NULL){
+        goto cleanup;
+    }
+
+
+    /* Is the session key valid?*/    
+    int sender_id = is_key_valid(session_key);
+    if(sender_id == -1){
+        res = NOT_AUTHORIZED;
+        goto cleanup;
+    }
+
+
+
+    json_object* arguments = NULL;
+    json_object_object_get_ex(jobject, ARGUMENTS, &arguments);
+
+    if(arguments == NULL){
+        goto cleanup;
+    }
+
+
+    /*Get the recipient_id*/
+    json_object* j_recipient_id = NULL;
+    int recipient_id = -1;
+
+    json_object_object_get_ex(arguments, RECIPIENT_ID, &j_recipient_id);
+
+    recipient_id = json_object_get_int(j_recipient_id);
+
+    if(recipient_id <= 0){
+        goto cleanup;
+    }
+
+
+    /* Get the content of the message*/
+    json_object* j_content = NULL;
+    char* content = NULL;
+
+    json_object_object_get_ex(arguments, CONTENT, &j_content);
+
+    if(j_content == NULL){
+        goto cleanup;
+    }
+
+    content = (char*) json_object_get_string(j_content);
+    if(content == NULL){
+        goto cleanup;
+    }
+
+
+    int db_res = add_message(db, sender_id, recipient_id, content);
+    res = (db_res == DB_SUCCESS ? SUCCESS: SERVER_FAILED); 
+
+
+    cleanup:
+        return res;
+
+}
+
 
 /* Handling Server Responses */
 int res_send_key(SSL* ssl, int user_id){ //Todo: actually add the session key
@@ -312,10 +388,12 @@ void *handle_connection(void *args_input){
         }
         
         command = get_command(receive_buffer, &jobject);
+        int res;
                 
         switch(command){
             case MAKE_ACCOUNT:
-                if(j_add_user(db, jobject, &username) == SUCCESS){
+                res = j_add_user(db, jobject, &username);
+                if(res == SUCCESS){
                     res_send_key(ssl, get_user_id(db, username));
                     free(username);
                     username = NULL;
@@ -324,8 +402,7 @@ void *handle_connection(void *args_input){
                 }
                 break;
             case LOGIN:
-                printf("Tried to log in\n");
-                int res = j_login_user(db, jobject, &username);
+                res = j_login_user(db, jobject, &username);
                 if(res == SUCCESS){
                     res_send_key(ssl, get_user_id(db, username));
                     free(username);
@@ -337,6 +414,19 @@ void *handle_connection(void *args_input){
                     SSL_write(ssl, S_BAD_REQUEST, strlen(S_BAD_REQUEST));
                 }
                 break;
+            case SEND_MESSAGE:
+                res = j_send_message(db, jobject, &username);
+                if(res == SUCCESS){
+                    SSL_write(ssl, S_SERVER_SUCCESS, strlen(S_SERVER_SUCCESS));
+                }else if(res == NOT_AUTHORIZED){
+                    SSL_write(ssl, S_NOT_AUTHORIZED, strlen(S_NOT_AUTHORIZED));
+                }else if(res == BAD_REQUEST){
+                    SSL_write(ssl, S_BAD_REQUEST, strlen(S_BAD_REQUEST));
+                }else{
+                    SSL_write(ssl, S_SERVER_FAILURE, strlen(S_SERVER_FAILURE));
+                }
+
+
             default:
                 SSL_write(ssl, S_BAD_REQUEST, strlen(S_BAD_REQUEST));
         }
