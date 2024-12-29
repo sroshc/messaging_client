@@ -19,6 +19,9 @@ Commands currently available:
     SEND_MESSAGE:  
         Expects "recipient_id" and "content", also needs a session_token
         Returns success or fail
+    GET_MESSAGES:
+        Expects "other_user_id" and needs session_token
+        Returns "messages" in json format
 
     
 
@@ -28,6 +31,7 @@ Commands currently available:
 Server response:
 {
     "response_code": 200,       //Server response, see list below
+    "session_token": session_token,     //If the user logged in or made an account
     "data": {
         "key1": "value1",
         "key2": "value2"
