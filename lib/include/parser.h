@@ -11,7 +11,11 @@ typedef struct json_object json_object;
 #define USERNAME "username"
 #define PASSWORD "password"
 #define RECIPIENT_ID "recipient_id"
+#define SENDER_ID "sender_id"
 #define CONTENT "content"
+#define OTHER_USER_ID "other_user_id"
+#define DATA "data"
+#define MESSAGES "messages"
 
 enum response{
     AUTHORIZED = 201,
@@ -25,7 +29,7 @@ enum Command{
     LOGIN,
     MAKE_ACCOUNT,
     SEND_MESSAGE,
-    GET_MESSAGE,
+    GET_MESSAGES,
     INVALID,
 };
 

@@ -4,7 +4,7 @@
 #include "../include/parser.h"
 
 
-const char* commands[] = {"LOGIN", "MAKE_ACCOUNT", "SEND_MESSAGE"};
+const char* commands[] = {"LOGIN", "MAKE_ACCOUNT", "SEND_MESSAGE", "GET_MESSAGES"};
 
 int get_command_int(const char* string_command){
     if(string_command == NULL){

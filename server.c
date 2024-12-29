@@ -33,7 +33,7 @@ char *S_SERVER_SUCCESS = "{\"response_code\": 200}";
 
 int server_fd; // Global server file descriptor so signal function can shut it down
 pthread_t client_threads[MAX_CLIENTS]; // Holds all handle_connection() threads
-int client_fds[MAX_CLIENTS] = { [0 ... MAX_CLIENTS-1] = -1 };  // Holds all currently connected client sockets, this shortcut to set all values to -1 only be used with the GCC compiler
+int client_fds[MAX_CLIENTS] = { [0 ... MAX_CLIENTS-1] = -1 };  // Holds all currently connected client sockets, this shortcut to set all values to -1 only can be used with the GCC compiler
 pthread_mutex_t connections_mutex = PTHREAD_MUTEX_INITIALIZER; 
 
 
@@ -137,6 +137,9 @@ void handle_errors(int err){
     return;
 }
 
+
+
+/* Handling server responses */
 int j_add_user(sqlite3* db, json_object* jobject, char** username_output){
     int res = BAD_REQUEST;
     json_object* arguments = NULL;
@@ -243,8 +246,7 @@ int j_login_user(sqlite3* db, json_object* jobject, char** username_output){
 
 }
 
-int j_send_message(sqlite3* db, json_object* jobject, char** username_output){
-    printf("Tried sending message\n");
+int j_send_message(sqlite3* db, json_object* jobject){
     int res = BAD_REQUEST;
     
     /* Check if user is logged in properly */
@@ -269,10 +271,6 @@ int j_send_message(sqlite3* db, json_object* jobject, char** username_output){
         res = NOT_AUTHORIZED;
         goto cleanup;
     }
-
-    printf("Key %s with userid %d tried sending message\n", session_key, sender_id);
-
-
 
     json_object* arguments = NULL;
     json_object_object_get_ex(jobject, ARGUMENTS, &arguments);
@@ -320,8 +318,98 @@ int j_send_message(sqlite3* db, json_object* jobject, char** username_output){
 
 }
 
+ int j_get_messages(sqlite3* db, json_object* jobject, SSL *ssl){
+    int res = BAD_REQUEST;
+    
+    json_object* j_session_key = NULL;
+    json_object_object_get_ex(jobject, SESSION_TOKEN, &j_session_key);
+    
+    if(j_session_key == NULL){
+        printf("Sesssion token not found!\n");
+        goto cleanup;
+    }
+    
+    const char* session_key = json_object_get_string(j_session_key);
 
-/* Handling Server Responses */
+    int sender_id = is_key_valid(session_key);
+    if(sender_id == -1){
+        res = NOT_AUTHORIZED;
+        goto cleanup;
+    }
+
+    json_object* args = NULL;
+    json_object_object_get_ex(jobject, ARGUMENTS, &args);
+
+    if(args == NULL){
+                printf("Arguments not found! not found!\n");
+
+        goto cleanup;
+    }
+
+    json_object* j_other_user_id = NULL;
+    json_object_object_get_ex(args, OTHER_USER_ID, &j_other_user_id);
+    if(j_other_user_id == NULL){
+                        printf("Other userid not found!\n");
+
+        goto cleanup;
+    }
+
+
+    int other_user_id = json_object_get_int(j_other_user_id);
+    if(other_user_id <= 0){
+                                printf("Other userid was not valid!\n");
+
+        goto cleanup;
+    }    
+
+    json_object* j_messages_arr = NULL;
+    int message_count = -1;
+
+    int db_res = get_messages_json(db, sender_id, other_user_id, &j_messages_arr, &message_count);
+
+    if(db_res == DB_FAIL || j_messages_arr == NULL){
+        res = SERVER_FAILED;
+        goto cleanup;
+    }
+
+    json_object* j_res = json_tokener_parse(S_SERVER_SUCCESS);
+    
+    if(j_res == NULL){
+        res = SERVER_FAILED;
+        json_object_put(j_messages_arr);
+        goto cleanup;
+    }
+
+    json_object* j_data = json_object_new_object();
+
+    json_object_object_add(j_data, MESSAGES, j_messages_arr);
+    json_object_object_add(j_res, DATA, j_data);
+    res = SUCCESS;
+
+
+    cleanup:
+        switch(res){
+            case SUCCESS:
+                const char* final_response = json_object_to_json_string_ext(j_res, JSON_C_TO_STRING_NOSLASHESCAPE);                
+                SSL_write(ssl, final_response, strlen(final_response));
+                break;
+            case NOT_AUTHORIZED:
+                SSL_write(ssl, S_NOT_AUTHORIZED, strlen(S_NOT_AUTHORIZED));
+                break;
+            case SERVER_FAILED:
+                SSL_write(ssl, S_SERVER_FAILURE, strlen(S_SERVER_FAILURE));
+                break;
+            default:
+                SSL_write(ssl, S_BAD_REQUEST, strlen(S_BAD_REQUEST));
+        }
+
+        return res;
+
+
+} 
+
+
+
 int res_send_key(SSL* ssl, int user_id){ 
     json_object *jobj;
 
@@ -418,7 +506,7 @@ void *handle_connection(void *args_input){
                 }
                 break;
             case SEND_MESSAGE:
-                res = j_send_message(db, jobject, &username);
+                res = j_send_message(db, jobject);
                 if(res == SUCCESS){
                     SSL_write(ssl, S_SERVER_SUCCESS, strlen(S_SERVER_SUCCESS));
                 }else if(res == NOT_AUTHORIZED){
@@ -429,8 +517,9 @@ void *handle_connection(void *args_input){
                     SSL_write(ssl, S_SERVER_FAILURE, strlen(S_SERVER_FAILURE));
                 }
                 break;
-
-
+             case GET_MESSAGES:
+                j_get_messages(db, jobject, ssl); //Thisll just send the response
+                break;
             default:
                 SSL_write(ssl, S_BAD_REQUEST, strlen(S_BAD_REQUEST));
         }
