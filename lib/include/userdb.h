@@ -27,6 +27,8 @@ int get_user_id(sqlite3* db, char* username);
 
 int add_message(sqlite3 *db, int sender_id, int receiver_id, char *text);
 
+int get_messages_json(sqlite3* db, int user1_id, int user2_id, json_object** res, int* message_count);
+
 int print_all(sqlite3 *db, char* table);
 
 void close_db(sqlite3 *db);

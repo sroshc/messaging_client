@@ -6,9 +6,12 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <pthread.h>
+
+#include <json-c/json.h>
+
 #include "../include/userdb.h"
 #include "../include/encode.h"
-
+#include "../include/parser.h"
 
 pthread_mutex_t g_db_mutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -262,7 +265,7 @@ int get_messages(sqlite3* db, int user1_id, int user2_id, char*** messages, int*
         "SELECT CONTENT FROM MESSAGES "
         "WHERE (SENDER_ID = ? AND RECEIVER_ID = ?) "
         "   OR (SENDER_ID = ? AND RECEIVER_ID = ?) "
-        "ORDER BY TIMESTAMP ASC";
+        "ORDER BY TIMESTAMP DESC";
 
     sqlite3_stmt* stmt = NULL;
     int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, 0);
@@ -327,6 +330,55 @@ int get_messages(sqlite3* db, int user1_id, int user2_id, char*** messages, int*
     *message_count = 0;
     sqlite3_finalize(stmt);
     return rc;
+}
+
+int get_messages_json(sqlite3* db, int user1_id, int user2_id, json_object** res, int* message_count){
+    const char* sql = 
+        "SELECT CONTENT, SENDER_ID FROM MESSAGES "
+        "WHERE (SENDER_ID = ? AND RECEIVER_ID = ?) "
+        "   OR (SENDER_ID = ? AND RECEIVER_ID = ?) "
+        "ORDER BY TIMESTAMP DESC";
+
+    sqlite3_stmt* stmt = NULL;
+    int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, 0);
+    if (rc != SQLITE_OK) {
+        fprintf(stderr, "Failed to prepare statement in get_messages: %s\n", sqlite3_errmsg(db));
+        return DB_FAIL;
+    }
+
+    sqlite3_bind_int(stmt, 1, user1_id);
+    sqlite3_bind_int(stmt, 2, user2_id);
+    sqlite3_bind_int(stmt, 3, user2_id);
+    sqlite3_bind_int(stmt, 4, user1_id);
+
+    int count = 0;
+    json_object* j_messages_arr = json_object_new_array(); 
+
+    while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+        const char* message = (const char*)sqlite3_column_text(stmt, 0);
+        int sender_id = sqlite3_column_int(stmt, 1);
+        json_object* j_message = json_object_new_object();
+        
+        json_object_object_add(j_message, SENDER_ID, json_object_new_int(sender_id));
+        json_object_object_add(j_message, CONTENT, json_object_new_string(message));
+
+        json_object_array_add(j_messages_arr, j_message);
+        count++;
+    }
+
+    if(rc != SQLITE_DONE){
+        fprintf(stderr, "Failed to run get_messages_json query: %s\n", sqlite3_errmsg(db));
+        json_object_put(j_messages_arr);
+        *res = NULL;
+        *message_count = -1;
+        return DB_FAIL;
+    }
+
+    *res = j_messages_arr;
+    *message_count = count;
+
+
+    return DB_SUCCESS;
 }
 
 void free_messages(char** messages, int message_count) {
