@@ -1,6 +1,6 @@
 CC = cc
 CFLAGS = -Wall -g
-OBJ = server.o hash.o parser.o userdb.o encode.o
+OBJ = server.o hash.o parser.o userdb.o encode.o msgqueue.o
 TARGET = server
 
 all: $(TARGET)
@@ -22,6 +22,9 @@ parser.o: lib/src/parser.c lib/include/parser.h
 
 encode.o: lib/src/encode.c lib/include/encode.h
 	$(CC) $(CFLAGS) -c lib/src/encode.c
+
+msgqueue.o: lib/src/msgqueue.c lib/include/msgqueue.h
+	$(CC) $(CFLAGS) -c lib/src/msgqueue.c
 
 clean:
 	rm -f $(OBJ) $(TARGET)

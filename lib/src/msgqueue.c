@@ -1,6 +1,7 @@
 #include <openssl/ssl.h>
 #include <stdbool.h>
 #include <string.h>
+#include <unistd.h>
 #include <stdio.h>
 #include <json-c/json.h>
 #include <pthread.h>
@@ -100,6 +101,19 @@ int update_user_id(int index, int user_id){
     return CLIENT_LIST_SUCCESS;
 }
 
+int update_client_thread(int index, pthread_t ct){
+    if(index >= MAX_CLIENTS || index < 0){
+        return CLIENT_LIST_FAILED;
+    }else{
+        pthread_mutex_lock(&client_lock);
+        global_clients[index].client_thread = ct;
+        //clear_message_queue(index);
+        pthread_mutex_unlock(&client_lock);
+        
+    }
+
+    return CLIENT_LIST_SUCCESS;
+}
 int queue_message(json_object* j_msg, int user_id){
     int index = -1;
     
@@ -162,10 +176,24 @@ int send_message_queue(SSL* ssl, int index){
     pthread_mutex_lock(&client_lock);
     while(mp != NULL){
         const char* msg = json_object_to_json_string_ext(mp->message, JSON_C_TO_STRING_NOSLASHESCAPE);
-        int write_res = SSL_write(ssl, msg, strlen(msg));
+        SSL_write(ssl, msg, strlen(msg));
         mp = mp->next;
     }
     clear_message_queue(index);
     pthread_mutex_unlock(&client_lock);
 
+    return CLIENT_LIST_SUCCESS;
+
+}
+
+int close_clients(){
+    pthread_mutex_lock(&client_lock);
+    
+    for(int i = 0; i < MAX_CLIENTS; i++){
+        close(global_clients[i].client_fd);
+    }
+
+    pthread_mutex_unlock(&client_lock);
+
+    return CLIENT_LIST_SUCCESS;
 }

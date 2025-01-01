@@ -17,10 +17,14 @@ int clear_message_queue(int index);  // No mutex lock, should only be used on ac
 
 int update_user_id(int index, int user_id);
 
+int update_client_thread(int index, pthread_t ct);
+
 int queue_message(json_object* j_msg, int user_id);
 
 int remove_client(int index);
 
 int send_message_queue(SSL* ssl, int index);
+
+int close_clients();
 
 #endif
