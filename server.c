@@ -18,6 +18,7 @@
 #include "lib/include/userdb.h"
 #include "lib/include/termlib.h"
 #include "lib/include/hash.h"
+#include "lib/include/msgqueue.h"
 
 #define PORT 8080
 #define SOCKETERROR (-1)
@@ -32,6 +33,7 @@ char *S_SERVER_SUCCESS = "{\"response_code\": 200}";
 
 
 int server_fd; // Global server file descriptor so signal function can shut it down
+
 pthread_t client_threads[MAX_CLIENTS]; // Holds all handle_connection() threads
 int client_fds[MAX_CLIENTS] = { [0 ... MAX_CLIENTS-1] = -1 };  // Holds all currently connected client sockets, this shortcut to set all values to -1 only can be used with the GCC compiler
 pthread_mutex_t connections_mutex = PTHREAD_MUTEX_INITIALIZER; 
@@ -41,7 +43,7 @@ pthread_mutex_t connections_mutex = PTHREAD_MUTEX_INITIALIZER;
 #define SERVER_OFFLINE 0
 int SERVER_STATUS = SERVER_ONLINE;
 
-char* DATABASE_NAME = "db";
+const char* DATABASE_NAME = "db";
 
 typedef struct{
     int client_fd;
@@ -51,14 +53,10 @@ typedef struct{
     int thread_index;
 } t_client_args;
 
-typedef struct{
-    int client_fd;
-    SSL_CTX* ctx;
 
-} full_client_args;
 
 void init_db(){
-    create_database(DATABASE_NAME);
+    create_database((char*)DATABASE_NAME);
 }
 
 sqlite3* get_db_connection(){
@@ -468,6 +466,7 @@ void *handle_connection(void *args_input){
     json_object * jobject = NULL;
     int bytes_read = 0;
     int command;
+    int user_id;
     char* username = NULL;
 
     while(SERVER_STATUS == SERVER_ONLINE && (bytes_read = SSL_read(ssl, receive_buffer, sizeof(receive_buffer) - 1)) > 0){
@@ -541,9 +540,7 @@ void *handle_connection(void *args_input){
         if(username) free(username);
         username = NULL;
 
-        pthread_mutex_lock(&connections_mutex);
-        client_fds[client->thread_index] = -1;
-        pthread_mutex_unlock(&connections_mutex);
+        remove_client(client->thread_index);
 
         if (ssl) {
             int shutdown_result = SSL_shutdown(ssl);
@@ -570,7 +567,7 @@ void *handle_connection(void *args_input){
 }
 
 
-//TODO: make this multithreaded if you feel like it
+//TODO: make this multithreaded if you feel like it, dont actually 
 void handle_client_limit(int client_fd, SSL_CTX* ctx){
     SSL *ssl = NULL;
     ssl = SSL_new(ctx);
@@ -608,13 +605,7 @@ void handle_SIGPIPE(int err){
 void quit_handler(int err){
     printf("Shutting down server...\n");
 
-    pthread_mutex_lock(&connections_mutex);
-    for(int i = 0; i < MAX_CLIENTS; i++){
-        if(client_fds[i] != -1){
-            close(client_fds[i]);
-        }
-    }
-    pthread_mutex_unlock(&connections_mutex);
+    close_clients();
 
     printf("Closed all client connections.\n");
 
@@ -639,6 +630,7 @@ int main() {
     struct sockaddr_in addr;
     SSL_CTX *ctx;
 
+    init_global_client_list();
     init_db();
     init_openssl();
     ctx = create_context();
@@ -670,24 +662,15 @@ int main() {
     int thread_index;
 
     while(SERVER_STATUS == SERVER_ONLINE){
-        int accept_result = client_fd = accept(server_fd, (struct sockaddr *) &client_addr, &socklen);
-        if(accept_result == SOCKETERROR){
+        client_fd = accept(server_fd, (struct sockaddr *) &client_addr, &socklen);
+        if(client_fd == SOCKETERROR){
             printf("Breaking out of listening loop\n");
             break;
         }
 
-        pthread_mutex_lock(&connections_mutex);
-        thread_index = -1;
-        for(int i = 0; i < MAX_CLIENTS; i++){
-            if(client_fds[i] == -1){
-                thread_index = i;
-                client_fds[i] = client_fd;
-                break;
-            }
-        }
-        pthread_mutex_unlock(&connections_mutex);
+        thread_index = add_client(-1, client_fd);
 
-        if(thread_index == -1){
+        if(thread_index == CLIENT_LIST_FULL){
             handle_client_limit(client_fd, ctx);
             continue;
         }
@@ -699,14 +682,6 @@ int main() {
         
         pthread_t t;
         t_client_args* args = malloc(sizeof(t_client_args));
-
-        if(args == NULL){
-            perror("Failed allocating memory for arguments.");
-            client_fds[thread_index] = -1; 
-            close(client_fd);
-            continue;
-        }
-
         
         args->client_fd = client_fd;
         args->ctx = ctx;
@@ -714,11 +689,8 @@ int main() {
         args->client_sockaddr = client_addr;
         args->thread_index = thread_index;
 
-        pthread_mutex_lock(&connections_mutex);
-        client_threads[thread_index] = t;
-        pthread_mutex_unlock(&connections_mutex);
-
         pthread_create(&t, NULL, handle_connection, args);
+        update_client_thread(thread_index,t);
         pthread_detach(t);
     }
 
